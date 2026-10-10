@@ -167,7 +167,7 @@ export default function LeaseAnalyticsClient() {
       Object.defineProperty(CSSStyleSheet.prototype, 'cssRules', {
         get() {
           try {
-            return originalCssRules.get.call(this);
+            return originalCssRules.get?.call(this) || [];
           } catch (e) {
             return []; // Fail gracefully instead of crashing
           }
@@ -392,7 +392,7 @@ export default function LeaseAnalyticsClient() {
                   <div className="border-b border-slate-200 pb-4 hidden print:block">
                      <h2 className="text-2xl font-bold text-slate-900">Lease Analytics Report</h2>
                      <p className="text-sm font-semibold text-slate-500 mt-1">
-                        Site Code: <span className="text-slate-800">{sites.find(s => s.id.toString() === selectedSiteId)?.site_code}</span> • Generated: <span className="text-slate-800">{new Date().toLocaleDateString()}</span>
+                        Site Code: <span className="text-slate-800">{sites.find(s => s.id.toString() === selectedSiteId)?.site_code}</span> | Generated: <span className="text-slate-800">{new Date().toLocaleDateString()}</span>
                      </p>
                   </div>
 
