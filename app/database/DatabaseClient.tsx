@@ -35,6 +35,7 @@ export default function DatabaseClient() {
   const [siteLogs, setSiteLogs] = useState<any[]>([]);
   const [siteDocuments, setSiteDocuments] = useState<any[]>([]);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [deletingDocId, setDeletingDocId] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -169,6 +170,51 @@ export default function DatabaseClient() {
       const { error } = await supabase.from("assets").delete().eq("id", editingId);
       if (error) setMessage({ type: "error", text: error.message });
       else { fetchSites(); setView("list"); }
+    }
+  };
+
+  const handleDeleteExistingDocument = async (doc: any) => {
+    const confirmRemove = window.confirm(`Are you sure you want to permanently delete "${doc.file_name}"?`);
+    if (!confirmRemove) return;
+
+    setDeletingDocId(doc.id);
+    setMessage(null);
+
+    try {
+      // 1. Extract storage object path from public URL if present and remove from Supabase Storage
+      if (doc.file_url && doc.file_url.includes("/documents/")) {
+        const storagePath = decodeURIComponent(doc.file_url.split("/documents/")[1]);
+        if (storagePath) {
+          await supabase.storage.from("documents").remove([storagePath]);
+        }
+      }
+
+      // 2. Unlink any foreign key reference in lease_analytics so deletion is never blocked
+      await supabase.from("lease_analytics").update({ document_id: null }).eq("document_id", doc.id);
+
+      // 3. Delete record from site_documents table
+      const { error: dbError } = await supabase.from("site_documents").delete().eq("id", doc.id);
+      if (dbError) throw dbError;
+
+      // 4. Update local state immediately
+      setSiteDocuments(prev => prev.filter(d => d.id !== doc.id));
+
+      // 5. Log the removal in site_logs
+      if (editingId) {
+        await supabase.from("site_logs").insert([{
+          site_id: editingId,
+          user_name: currentUser,
+          description: `Removed document: ${doc.file_name}`
+        }]);
+        fetchSiteLogs(editingId);
+      }
+
+      setMessage({ type: "success", text: `Document "${doc.file_name}" deleted.` });
+    } catch (err: any) {
+      console.error("Failed to delete document:", err);
+      setMessage({ type: "error", text: `Failed to delete document: ${err.message}` });
+    } finally {
+      setDeletingDocId(null);
     }
   };
 
@@ -517,7 +563,7 @@ export default function DatabaseClient() {
         {view === "list" ? (
           canEdit && (
             <button 
-              onClick={() => { setSelectedSite(null); setFormData(emptyForm); setPendingFiles([]); setActiveTab("manual"); setView("new"); setMessage(null); }} 
+              onClick={() => { setSelectedSite(null); setFormData(emptyForm); setPendingFiles([]); setSiteDocuments([]); setActiveTab("manual"); setView("new"); setMessage(null); }} 
               className="mb-4 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-all flex items-center gap-2"
             >
               <span>+</span> Create Site
@@ -919,14 +965,68 @@ export default function DatabaseClient() {
                   </div>
                 </div>
 
-                <div className="bg-slate-50/50 rounded-xl border border-slate-200 shadow-sm p-8">
-                  <div className="flex justify-between items-center mb-6 border-b border-slate-200 pb-3">
-                    <h4 className="text-sm font-bold uppercase text-slate-800">Site Document Upload</h4>
+                <div className="bg-slate-50/50 rounded-xl border border-slate-200 shadow-sm p-8 space-y-8">
+                  <div className="flex justify-between items-center border-b border-slate-200 pb-3">
+                    <h4 className="text-sm font-bold uppercase text-slate-800">Site Documents & Repository</h4>
                     <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">Prepares AI Analytics</span>
                   </div>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+
+                  {/* Existing Uploaded Documents (Shown in Edit Mode) */}
+                  {view === "edit" && (
                     <div>
+                      <h5 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">
+                        Existing Uploaded Documents ({siteDocuments.length})
+                      </h5>
+                      {siteDocuments.length > 0 ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {siteDocuments.map(doc => (
+                            <div
+                              key={doc.id}
+                              className="flex items-center justify-between bg-white border border-slate-200 p-3.5 rounded-lg shadow-sm hover:border-slate-300 transition-all"
+                            >
+                              <a
+                                href={doc.file_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center overflow-hidden mr-3 group flex-1"
+                                title={`Open ${doc.file_name}`}
+                              >
+                                <span className="text-2xl mr-3 flex-shrink-0 group-hover:scale-110 transition-transform">
+                                  {getFileIcon(doc.file_name)}
+                                </span>
+                                <div className="overflow-hidden">
+                                  <p className="text-sm font-semibold text-slate-800 group-hover:text-blue-600 truncate transition-colors">
+                                    {doc.file_name}
+                                  </p>
+                                  <p className="text-[11px] text-slate-400 mt-0.5">
+                                    {(doc.file_size / 1024).toFixed(1)} KB • {new Date(doc.created_at).toLocaleDateString()}
+                                  </p>
+                                </div>
+                              </a>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteExistingDocument(doc)}
+                                disabled={deletingDocId === doc.id}
+                                className="px-2.5 py-1.5 text-xs font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-md transition-colors flex-shrink-0 disabled:opacity-50"
+                                title="Delete document permanently"
+                              >
+                                {deletingDocId === doc.id ? "Deleting..." : "Delete"}
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="p-6 text-center border border-slate-200/80 bg-white rounded-xl">
+                          <p className="text-sm font-medium text-slate-400">No existing documents uploaded for this site.</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  
+                  {/* Upload New Documents Section */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-2">
+                    <div>
+                      <h5 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Add New Documents</h5>
                       <div 
                         className="border-2 border-dashed border-blue-200 bg-blue-50/30 rounded-xl p-8 text-center cursor-pointer hover:bg-blue-50/70 hover:border-blue-300 transition-colors"
                         onClick={() => fileInputRef.current?.click()}
@@ -939,7 +1039,7 @@ export default function DatabaseClient() {
                     </div>
 
                     <div>
-                      <h5 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Files to be attached</h5>
+                      <h5 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">New Files Queued for Upload</h5>
                       {pendingFiles.length > 0 ? (
                         <ul className="space-y-2">
                           {pendingFiles.map((file, idx) => (
