@@ -27,12 +27,25 @@ export default function Header() {
     return email ? email.substring(0, 2).toUpperCase() : "U";
   };
 
+  // If the user clicks the nav button for the page they are ALREADY on,
+  // dispatch a custom baseline reset event so the active page immediately resets to its home/master state.
+  const handleNavClick = (href: string) => {
+    setIsMobileMenuOpen(false);
+    if (pathname === href && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("reAIgent:reset-page"));
+    }
+  };
+
   return (
     <header className="bg-[#0B132B] text-white shadow-md sticky top-0 z-50 border-b border-slate-800">
       <div className="max-w-[1600px] mx-auto px-4 sm:px-8 h-16 flex items-center justify-between">
         
         {/* Logo / Brand */}
-        <Link href="/" className="flex items-center gap-3 hover:opacity-90 transition-opacity">
+        <Link
+          href="/"
+          onClick={() => handleNavClick("/")}
+          className="flex items-center gap-3 hover:opacity-90 transition-opacity"
+        >
           <div className="w-10 h-10 rounded-lg overflow-hidden shadow-sm border border-slate-700/50 flex-shrink-0">
             <Image src="/reAIgent_V2.png" alt="reAIgent Logo" width={40} height={40} className="object-cover w-full h-full" priority />
           </div>
@@ -46,7 +59,16 @@ export default function Header() {
           {navLinks.map((link) => {
             const isActive = pathname === link.href;
             return (
-              <Link key={link.name} href={link.href} className={`px-4 py-2 rounded-md transition-all ${isActive ? "bg-blue-600 text-white shadow-sm" : "text-slate-300 hover:text-white hover:bg-white/10"}`}>
+              <Link
+                key={link.name}
+                href={link.href}
+                onClick={() => handleNavClick(link.href)}
+                className={`px-4 py-2 rounded-md transition-all ${
+                  isActive
+                    ? "bg-blue-600 text-white shadow-sm"
+                    : "text-slate-300 hover:text-white hover:bg-white/10"
+                }`}
+              >
                 {link.name}
               </Link>
             );
@@ -101,8 +123,12 @@ export default function Header() {
               <Link 
                 key={link.name} 
                 href={link.href} 
-                onClick={() => setIsMobileMenuOpen(false)}
-                className={`block px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${isActive ? "bg-blue-600 text-white shadow-sm" : "text-slate-300 hover:text-white hover:bg-white/10"}`}
+                onClick={() => handleNavClick(link.href)}
+                className={`block px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                  isActive
+                    ? "bg-blue-600 text-white shadow-sm"
+                    : "text-slate-300 hover:text-white hover:bg-white/10"
+                }`}
               >
                 {link.name}
               </Link>
