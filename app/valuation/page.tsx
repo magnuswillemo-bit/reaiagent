@@ -107,7 +107,6 @@ export default function ValuationPage() {
       setConfidenceRating(data.confidence_rating);
       setConfidenceExplanation(data.confidence_explanation);
 
-      // Embed confidence metadata prefix so history tables always display it without requiring DB schema migrations
       const storedAssessment = data.confidence_rating
         ? `<!--CONFIDENCE:${data.confidence_rating}-->\n${data.assessment || ""}`
         : data.assessment;
@@ -173,7 +172,7 @@ export default function ValuationPage() {
       };
 
       // 1. Top Corporate Header Banner
-      doc.setFillColor(15, 23, 42); // Slate-900
+      doc.setFillColor(15, 23, 42);
       doc.rect(0, 0, pageWidth, 34, "F");
 
       doc.setFont("helvetica", "bold");
@@ -186,7 +185,7 @@ export default function ValuationPage() {
 
       doc.setFont("helvetica", "normal");
       doc.setFontSize(9.5);
-      doc.setTextColor(148, 163, 184); // Slate-400
+      doc.setTextColor(148, 163, 184);
       const dateFormatted = new Date().toISOString().split("T")[0];
       doc.text(
         `Site: ${targetSite.site_code} — ${targetSite.common_name || ""} (${targetSite.city || ""}, ${targetSite.country || ""})`,
@@ -208,11 +207,10 @@ export default function ValuationPage() {
       const confLines = doc.splitTextToSize(confExplanationText, contentWidth - 12);
       const summaryBoxHeight = Math.max(32, 24 + confLines.length * 4.5);
 
-      doc.setFillColor(248, 250, 252); // Slate-50
-      doc.setDrawColor(226, 232, 240); // Slate-200
+      doc.setFillColor(248, 250, 252);
+      doc.setDrawColor(226, 232, 240);
       doc.roundedRect(margin, y, contentWidth, summaryBoxHeight, 3, 3, "FD");
 
-      // Estimated Value (Left)
       doc.setFont("helvetica", "bold");
       doc.setFontSize(8);
       doc.setTextColor(100, 116, 139);
@@ -223,7 +221,6 @@ export default function ValuationPage() {
       doc.setTextColor(15, 23, 42);
       doc.text(valFormatted, margin + 6, y + 16);
 
-      // Confidence Pill (Right)
       if (confidenceRating) {
         const ratingUpper = confidenceRating.toUpperCase();
         let badgeBg: [number, number, number] = [226, 232, 240];
@@ -253,7 +250,6 @@ export default function ValuationPage() {
         );
       }
 
-      // Confidence Explanation
       if (confLines.length > 0) {
         doc.setDrawColor(226, 232, 240);
         doc.line(margin + 6, y + 20, pageWidth - margin - 6, y + 20);
@@ -275,7 +271,6 @@ export default function ValuationPage() {
           continue;
         }
 
-        // Section Heading (## or ###)
         if (trimmed.startsWith("## ") || trimmed.startsWith("### ")) {
           const headingText = cleanMarkdownText(trimmed.replace(/^#+\s*/, ""));
           ensureSpace(14);
@@ -291,7 +286,6 @@ export default function ValuationPage() {
           continue;
         }
 
-        // Bullet Points (* or - or numbered 1.)
         if (trimmed.startsWith("* ") || trimmed.startsWith("- ") || /^\d+\.\s/.test(trimmed)) {
           const isNumbered = /^\d+\.\s/.test(trimmed);
           const prefix = isNumbered ? trimmed.match(/^\d+\./)?.[0] || "•" : "•";
@@ -308,7 +302,7 @@ export default function ValuationPage() {
           ensureSpace(blockHeight);
 
           doc.setFont("helvetica", "bold");
-          doc.setTextColor(37, 99, 235); // Blue accent bullet
+          doc.setTextColor(37, 99, 235);
           doc.text(prefix, margin + 1, y);
 
           doc.setFont("helvetica", "normal");
@@ -318,7 +312,6 @@ export default function ValuationPage() {
           continue;
         }
 
-        // Regular Paragraph
         const cleanedPara = cleanMarkdownText(trimmed);
         doc.setFont("helvetica", "normal");
         doc.setFontSize(9.5);
@@ -350,7 +343,7 @@ export default function ValuationPage() {
         });
       }
 
-      // 5. Determine Naming Convention, Trigger Download & Upload to Supabase
+      // 5. Save Locally & Upload to "Valuations" Bucket in Supabase
       const reportType = contractFilter === "Owned" ? "FMV" : "FMR";
       const fileName = `${dateFormatted}_${targetSite.site_code}_${reportType}_Report.pdf`;
 
@@ -370,7 +363,7 @@ export default function ValuationPage() {
         site_id: targetSite.id,
         file_name: fileName,
         file_size: pdfBlob.size,
-        file_type: "application/pdf",
+        file_type: "Valuations",
         file_url: publicUrlData.publicUrl,
         uploaded_by: "System"
       }]);

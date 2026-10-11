@@ -110,7 +110,7 @@ export default function LeaseAnalyticsClient() {
             site_id: Number(selectedSiteId), 
             file_name: file.name, 
             file_size: file.size,
-            file_type: file.type || 'unknown', 
+            file_type: "Lease Agreements", 
             file_url: publicUrlData.publicUrl, 
             uploaded_by: user?.email || "System"
           }]).select();
@@ -148,6 +148,10 @@ export default function LeaseAnalyticsClient() {
       setActiveReport(aiData.data);
       setNewFiles([]);
       
+      // Refresh document list so newly uploaded leases appear immediately
+      const { data: updatedDocs } = await supabase.from("site_documents").select("*").eq("site_id", selectedSiteId).order("created_at", { ascending: false });
+      if (updatedDocs) setSiteDocuments(updatedDocs);
+      
     } catch (err: any) {
       setError(`Error: ${err.message}. Please try again.`);
     } finally {
@@ -183,7 +187,7 @@ export default function LeaseAnalyticsClient() {
       };
 
       // 1. Top Corporate Header Banner
-      doc.setFillColor(15, 23, 42); // Slate-900
+      doc.setFillColor(15, 23, 42);
       doc.rect(0, 0, pageWidth, 32, "F");
 
       doc.setFont("helvetica", "bold");
@@ -213,7 +217,6 @@ export default function LeaseAnalyticsClient() {
       doc.line(margin, y, pageWidth - margin, y);
       y += 6;
 
-      // Helper to render Strengths & Weaknesses boxes cleanly
       const renderSummaryBlock = (
         title: string,
         items: string[],
@@ -262,20 +265,20 @@ export default function LeaseAnalyticsClient() {
       renderSummaryBlock(
         "Contract Strengths",
         activeReport.executive_summary?.strengths || [],
-        [240, 253, 244], // Emerald-50
-        [187, 247, 208], // Emerald-200
-        [6, 95, 70]      // Emerald-800
+        [240, 253, 244],
+        [187, 247, 208],
+        [6, 95, 70]
       );
 
       renderSummaryBlock(
         "Contract Weaknesses",
         activeReport.executive_summary?.weaknesses || [],
-        [255, 241, 242], // Rose-50
-        [254, 205, 211], // Rose-200
-        [159, 18, 57]    // Rose-800
+        [255, 241, 242],
+        [254, 205, 211],
+        [159, 18, 57]
       );
 
-      // 3. Pre-Negotiation Playbook (2x2 Clean Grid instead of cramped 4 columns)
+      // 3. Pre-Negotiation Playbook (2x2 Clean Grid)
       const playbook = activeReport.executive_summary?.negotiation_playbook;
       if (playbook) {
         const categories = [
@@ -323,12 +326,11 @@ export default function LeaseAnalyticsClient() {
 
           ensureSpace(rowHeight + 4);
 
-          // Draw Left Card
-          doc.setFillColor(30, 41, 59); // Slate-800
+          doc.setFillColor(30, 41, 59);
           doc.roundedRect(margin, y, colWidth, rowHeight, 2, 2, "F");
           doc.setFont("helvetica", "bold");
           doc.setFontSize(8.5);
-          doc.setTextColor(147, 197, 253); // Blue-300
+          doc.setTextColor(147, 197, 253);
           doc.text(leftCat.label, margin + 5, y + 6.5);
 
           let ly = y + 12;
@@ -341,7 +343,6 @@ export default function LeaseAnalyticsClient() {
             ly += lines.length * 4.2 + 2;
           });
 
-          // Draw Right Card
           const rightX = margin + colWidth + colGap;
           doc.setFillColor(30, 41, 59);
           doc.roundedRect(rightX, y, colWidth, rowHeight, 2, 2, "F");
@@ -364,7 +365,7 @@ export default function LeaseAnalyticsClient() {
         }
       }
 
-      // 4. 15-Point Deep Dive Section (Each Clause Card Kept Intact Across Page Splits)
+      // 4. 15-Point Deep Dive Section
       ensureSpace(25);
       y += 4;
       doc.setFont("helvetica", "bold");
@@ -392,27 +393,22 @@ export default function LeaseAnalyticsClient() {
         const maxLines = Math.max(extractedLines.length, riskLines.length);
         const cardHeight = 18 + maxLines * 4.3 + 6;
 
-        // Prevent splitting any clause card across two pages
         ensureSpace(cardHeight + 4);
 
-        // Card Outer Frame
         doc.setFillColor(255, 255, 255);
         doc.setDrawColor(203, 213, 225);
         doc.roundedRect(margin, y, contentWidth, cardHeight, 2, 2, "FD");
 
-        // Card Top Header Strip
         doc.setFillColor(248, 250, 252);
         doc.rect(margin + 0.3, y + 0.3, contentWidth - 0.6, 10, "F");
         doc.setDrawColor(226, 232, 240);
         doc.line(margin, y + 10.3, pageWidth - margin, y + 10.3);
 
-        // Clause Title
         doc.setFont("helvetica", "bold");
         doc.setFontSize(9.5);
         doc.setTextColor(15, 23, 42);
         doc.text(`${clause.id}. ${clause.title}`, margin + 5, y + 6.8);
 
-        // Risk Badge Pill
         const level = (clause.risk_level || "Info").toUpperCase();
         let pillBg: [number, number, number] = [241, 245, 249];
         let pillFg: [number, number, number] = [71, 85, 105];
@@ -437,7 +433,6 @@ export default function LeaseAnalyticsClient() {
           align: "center",
         });
 
-        // Two-Column Body: Extracted Terms (Left) | AI Risk Analysis (Right)
         const leftColX = margin + 5;
         const rightColX = margin + 5 + innerColWidth + innerColGap;
         const subHeaderY = y + 15.5;
@@ -477,7 +472,7 @@ export default function LeaseAnalyticsClient() {
         });
       }
 
-      // 6. Trigger Browser Download & Upload to Supabase Vault
+      // 6. Trigger Browser Download & Upload to "Lease Analytics" Bucket in Supabase
       const fileName = `${dateStr}_${siteCode}_LeaseAnalyticsReport.pdf`;
       doc.save(fileName);
 
@@ -495,7 +490,7 @@ export default function LeaseAnalyticsClient() {
         site_id: targetSite?.id || Number(selectedSiteId),
         file_name: fileName,
         file_size: pdfBlob.size,
-        file_type: "application/pdf",
+        file_type: "Lease Analytics",
         file_url: publicUrlData.publicUrl,
         uploaded_by: user?.email || "System"
       }]);
@@ -503,6 +498,10 @@ export default function LeaseAnalyticsClient() {
       if (dbError) throw dbError;
 
       setPdfSuccess(true);
+
+      // Refresh document list so saved report appears immediately
+      const { data: updatedDocs } = await supabase.from("site_documents").select("*").eq("site_id", selectedSiteId).order("created_at", { ascending: false });
+      if (updatedDocs) setSiteDocuments(updatedDocs);
     } catch (err: any) {
       console.error(err);
       setError(`Failed to save PDF: ${err.message}`);

@@ -5,6 +5,15 @@ import { supabase } from "../../lib/supabase";
 import { useAuth } from "../../lib/AuthContext";
 
 type ViewState = "list" | "new" | "detail" | "edit";
+type ManualDocBucket = "Lease Agreements" | "Other";
+type DocBucket = "Lease Agreements" | "Valuations" | "Lease Analytics" | "Other";
+
+const DOC_BUCKETS: { key: DocBucket; icon: string; badgeClass: string }[] = [
+  { key: "Lease Agreements", icon: "📜", badgeClass: "bg-blue-50 text-blue-700 border-blue-200" },
+  { key: "Valuations", icon: "💰", badgeClass: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  { key: "Lease Analytics", icon: "📊", badgeClass: "bg-indigo-50 text-indigo-700 border-indigo-200" },
+  { key: "Other", icon: "📁", badgeClass: "bg-slate-100 text-slate-700 border-slate-200" },
+];
 
 const CURRENCIES = [
   "USD", "EUR", "GBP", "JPY", "SEK", "ZAR", "AED", "AFN", "ALL", "AMD", "ANG", "AOA", "ARS", "AUD", "AWG", "AZN", 
@@ -34,7 +43,8 @@ export default function DatabaseClient() {
   
   const [siteLogs, setSiteLogs] = useState<any[]>([]);
   const [siteDocuments, setSiteDocuments] = useState<any[]>([]);
-  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [pendingFiles, setPendingFiles] = useState<{ file: File; category: ManualDocBucket }[]>([]);
+  const [selectedUploadBucket, setSelectedUploadBucket] = useState<ManualDocBucket>("Lease Agreements");
   const [deletingDocId, setDeletingDocId] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -95,6 +105,30 @@ export default function DatabaseClient() {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  const resolveDocBucket = (doc: any): DocBucket => {
+    const rawType = (doc?.file_type || "").trim();
+    if (
+      rawType === "Lease Agreements" ||
+      rawType === "Valuations" ||
+      rawType === "Lease Analytics" ||
+      rawType === "Other"
+    ) {
+      return rawType as DocBucket;
+    }
+
+    const name = (doc?.file_name || "").toLowerCase();
+    if (name.includes("leaseanalyticsreport") || name.includes("lease_analytics")) {
+      return "Lease Analytics";
+    }
+    if (name.includes("_fmv_report") || name.includes("_fmr_report") || name.includes("valuation")) {
+      return "Valuations";
+    }
+    if (name.includes("lease") || name.includes("contract") || name.includes("agreement") || name.includes("addendum") || name.includes("appendix")) {
+      return "Lease Agreements";
+    }
+    return "Other";
+  };
 
   const fetchSites = async () => {
     const { data } = await supabase.from("assets").select("*").order("site_code", { ascending: true });
@@ -157,6 +191,7 @@ export default function DatabaseClient() {
     });
     setEditingId(site.id);
     setPendingFiles([]);
+    setSelectedUploadBucket("Lease Agreements");
     fetchSiteLogs(site.id);
     fetchSiteDocuments(site.id);
     setView("detail");
@@ -181,7 +216,6 @@ export default function DatabaseClient() {
     setMessage(null);
 
     try {
-      // 1. Extract storage object path from public URL if present and remove from Supabase Storage
       if (doc.file_url && doc.file_url.includes("/documents/")) {
         const storagePath = decodeURIComponent(doc.file_url.split("/documents/")[1]);
         if (storagePath) {
@@ -189,22 +223,18 @@ export default function DatabaseClient() {
         }
       }
 
-      // 2. Unlink any foreign key reference in lease_analytics so deletion is never blocked
       await supabase.from("lease_analytics").update({ document_id: null }).eq("document_id", doc.id);
 
-      // 3. Delete record from site_documents table
       const { error: dbError } = await supabase.from("site_documents").delete().eq("id", doc.id);
       if (dbError) throw dbError;
 
-      // 4. Update local state immediately
       setSiteDocuments(prev => prev.filter(d => d.id !== doc.id));
 
-      // 5. Log the removal in site_logs
       if (editingId) {
         await supabase.from("site_logs").insert([{
           site_id: editingId,
           user_name: currentUser,
-          description: `Removed document: ${doc.file_name}`
+          description: `Removed document (${resolveDocBucket(doc)}): ${doc.file_name}`
         }]);
         fetchSiteLogs(editingId);
       }
@@ -250,9 +280,19 @@ export default function DatabaseClient() {
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      const newFiles = Array.from(e.target.files);
+      const newFiles = Array.from(e.target.files).map(file => ({
+        file,
+        category: selectedUploadBucket
+      }));
       setPendingFiles(prev => [...prev, ...newFiles]);
+      e.target.value = "";
     }
+  };
+
+  const updatePendingFileCategory = (index: number, newCategory: ManualDocBucket) => {
+    setPendingFiles(prev =>
+      prev.map((item, idx) => (idx === index ? { ...item, category: newCategory } : item))
+    );
   };
   
   const removePendingFile = (index: number) => {
@@ -263,7 +303,8 @@ export default function DatabaseClient() {
     if (pendingFiles.length === 0) return 0;
     
     let successCount = 0;
-    for (const file of pendingFiles) {
+    for (const item of pendingFiles) {
+      const { file, category } = item;
       const fileExt = file.name.split('.').pop();
       const fileName = `${siteId}_${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
       
@@ -276,7 +317,7 @@ export default function DatabaseClient() {
           site_id: siteId,
           file_name: file.name,
           file_size: file.size,
-          file_type: file.type || 'unknown',
+          file_type: category,
           file_url: publicUrlData.publicUrl,
           uploaded_by: currentUser
         }]);
@@ -293,7 +334,6 @@ export default function DatabaseClient() {
     setIsSubmitting(true);
     setMessage(null);
 
-    // DO NOT INCLUDE AI FIELDS IN THE UPDATE PAYLOAD
     const payload: any = {
       site_code: formData.site_code, common_name: formData.common_name, divisional_belonging: formData.divisional_belonging,
       legal_entity: formData.legal_entity, jv_status: formData.jv_status, status: formData.status, activity_type: formData.activity_type, 
@@ -563,7 +603,7 @@ export default function DatabaseClient() {
         {view === "list" ? (
           canEdit && (
             <button 
-              onClick={() => { setSelectedSite(null); setFormData(emptyForm); setPendingFiles([]); setSiteDocuments([]); setActiveTab("manual"); setView("new"); setMessage(null); }} 
+              onClick={() => { setSelectedSite(null); setFormData(emptyForm); setPendingFiles([]); setSiteDocuments([]); setSelectedUploadBucket("Lease Agreements"); setActiveTab("manual"); setView("new"); setMessage(null); }} 
               className="mb-4 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-all flex items-center gap-2"
             >
               <span>+</span> Create Site
@@ -697,7 +737,6 @@ export default function DatabaseClient() {
                 <div><span className="block text-xs font-medium text-slate-400 mb-1.5 uppercase">Lease Term</span><span className="text-sm font-semibold text-slate-900">{selectedSite.lease_start || "-"} to {selectedSite.lease_end || "-"}</span></div>
                 <div><span className="block text-xs font-medium text-slate-400 mb-1.5 uppercase">Annual Cost</span><span className="text-sm font-semibold text-slate-900">{selectedSite.annual_cost ? `${selectedSite.annual_cost.toLocaleString()} ${selectedSite.local_currency}` : "-"}</span></div>
                 
-                {/* Standardized Read-Only AI Display Fields with Date Stamp */}
                 {selectedSite.contract_type === "Owned" && selectedSite.ai_fair_market_value && (
                   <div>
                     <span className="block text-xs font-medium text-slate-400 mb-1.5 uppercase">
@@ -730,32 +769,63 @@ export default function DatabaseClient() {
               </div>
             </div>
 
+            {/* 4-Bucket Document Repository in Site Detail View */}
             <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
               <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-between items-center">
                 <h4 className="text-xs font-bold uppercase text-slate-500 tracking-wider">Document Repository</h4>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">AI Analytics Ready</span>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                  {siteDocuments.length} Total Document{siteDocuments.length === 1 ? "" : "s"}
+                </span>
               </div>
               <div className="p-6">
-                {siteDocuments.length > 0 ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                    {siteDocuments.map(doc => (
-                      <a key={doc.id} href={doc.file_url} target="_blank" rel="noopener noreferrer" className="flex items-start p-4 border border-slate-200 rounded-lg hover:border-blue-300 hover:shadow-md transition-all group bg-slate-50">
-                        <div className="text-3xl mr-4 group-hover:scale-110 transition-transform">{getFileIcon(doc.file_name)}</div>
-                        <div className="overflow-hidden">
-                          <p className="text-sm font-semibold text-slate-900 truncate" title={doc.file_name}>{doc.file_name}</p>
-                          <p className="text-xs text-slate-500 mt-1">{(doc.file_size / 1024).toFixed(1)} KB</p>
-                          <p className="text-[10px] text-slate-400 mt-1 uppercase">{new Date(doc.created_at).toLocaleDateString()}</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {DOC_BUCKETS.map(bucket => {
+                    const docsInBucket = siteDocuments.filter(d => resolveDocBucket(d) === bucket.key);
+                    return (
+                      <div key={bucket.key} className="border border-slate-200 rounded-xl bg-slate-50/40 p-5 flex flex-col">
+                        <div className="flex items-center justify-between mb-4 pb-2.5 border-b border-slate-200/80">
+                          <div className="flex items-center gap-2">
+                            <span className="text-base">{bucket.icon}</span>
+                            <h5 className="text-xs font-bold uppercase tracking-wider text-slate-800">{bucket.key}</h5>
+                          </div>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${bucket.badgeClass}`}>
+                            {docsInBucket.length}
+                          </span>
                         </div>
-                      </a>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-8">
-                    <div className="text-4xl mb-3">📂</div>
-                    <p className="text-sm font-semibold text-slate-600">No documents uploaded.</p>
-                    <p className="text-xs text-slate-400 mt-1">{canEdit ? "Edit this site to upload deeds, leases, and floorplans." : "No documents are currently available for viewing."}</p>
-                  </div>
-                )}
+
+                        {docsInBucket.length > 0 ? (
+                          <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1">
+                            {docsInBucket.map(doc => (
+                              <a
+                                key={doc.id}
+                                href={doc.file_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-start p-3 bg-white border border-slate-200 rounded-lg hover:border-blue-300 hover:shadow-sm transition-all group"
+                              >
+                                <div className="text-2xl mr-3 group-hover:scale-105 transition-transform flex-shrink-0">
+                                  {getFileIcon(doc.file_name)}
+                                </div>
+                                <div className="overflow-hidden flex-1">
+                                  <p className="text-xs font-semibold text-slate-900 group-hover:text-blue-600 truncate transition-colors" title={doc.file_name}>
+                                    {doc.file_name}
+                                  </p>
+                                  <p className="text-[11px] text-slate-400 mt-0.5">
+                                    {(doc.file_size / 1024).toFixed(1)} KB • {new Date(doc.created_at).toLocaleDateString()}
+                                  </p>
+                                </div>
+                              </a>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="py-6 text-center text-xs text-slate-400 italic">
+                            No {bucket.key.toLowerCase()} stored.
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
@@ -925,7 +995,6 @@ export default function DatabaseClient() {
                     
                     <div className="hidden md:block"></div>
 
-                    {/* Standardized Read-Only AI Display Fields in Edit View */}
                     {(formData.ai_fair_market_value || formData.ai_fair_market_rent) && (
                       <>
                          {formData.ai_fair_market_value && (
@@ -965,98 +1034,175 @@ export default function DatabaseClient() {
                   </div>
                 </div>
 
+                {/* 4-Bucket Document Repository & Upload Manager */}
                 <div className="bg-slate-50/50 rounded-xl border border-slate-200 shadow-sm p-8 space-y-8">
                   <div className="flex justify-between items-center border-b border-slate-200 pb-3">
                     <h4 className="text-sm font-bold uppercase text-slate-800">Site Documents & Repository</h4>
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">Prepares AI Analytics</span>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                      4-Bucket Structured Vault
+                    </span>
                   </div>
 
-                  {/* Existing Uploaded Documents (Shown in Edit Mode) */}
+                  {/* Existing Uploaded Documents Grouped into 4 Buckets (Shown in Edit Mode) */}
                   {view === "edit" && (
                     <div>
                       <h5 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">
                         Existing Uploaded Documents ({siteDocuments.length})
                       </h5>
-                      {siteDocuments.length > 0 ? (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                          {siteDocuments.map(doc => (
-                            <div
-                              key={doc.id}
-                              className="flex items-center justify-between bg-white border border-slate-200 p-3.5 rounded-lg shadow-sm hover:border-slate-300 transition-all"
-                            >
-                              <a
-                                href={doc.file_url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex items-center overflow-hidden mr-3 group flex-1"
-                                title={`Open ${doc.file_name}`}
-                              >
-                                <span className="text-2xl mr-3 flex-shrink-0 group-hover:scale-110 transition-transform">
-                                  {getFileIcon(doc.file_name)}
-                                </span>
-                                <div className="overflow-hidden">
-                                  <p className="text-sm font-semibold text-slate-800 group-hover:text-blue-600 truncate transition-colors">
-                                    {doc.file_name}
-                                  </p>
-                                  <p className="text-[11px] text-slate-400 mt-0.5">
-                                    {(doc.file_size / 1024).toFixed(1)} KB • {new Date(doc.created_at).toLocaleDateString()}
-                                  </p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        {DOC_BUCKETS.map(bucket => {
+                          const docsInBucket = siteDocuments.filter(d => resolveDocBucket(d) === bucket.key);
+                          return (
+                            <div key={bucket.key} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+                              <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-100">
+                                <div className="flex items-center gap-2">
+                                  <span>{bucket.icon}</span>
+                                  <span className="text-xs font-bold uppercase tracking-wider text-slate-800">{bucket.key}</span>
                                 </div>
-                              </a>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteExistingDocument(doc)}
-                                disabled={deletingDocId === doc.id}
-                                className="px-2.5 py-1.5 text-xs font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-md transition-colors flex-shrink-0 disabled:opacity-50"
-                                title="Delete document permanently"
-                              >
-                                {deletingDocId === doc.id ? "Deleting..." : "Delete"}
-                              </button>
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${bucket.badgeClass}`}>
+                                  {docsInBucket.length}
+                                </span>
+                              </div>
+
+                              {docsInBucket.length > 0 ? (
+                                <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+                                  {docsInBucket.map(doc => (
+                                    <div
+                                      key={doc.id}
+                                      className="flex items-center justify-between bg-slate-50 border border-slate-200/80 p-2.5 rounded-lg hover:border-slate-300 transition-all"
+                                    >
+                                      <a
+                                        href={doc.file_url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="flex items-center overflow-hidden mr-3 group flex-1"
+                                        title={`Open ${doc.file_name}`}
+                                      >
+                                        <span className="text-xl mr-2.5 flex-shrink-0 group-hover:scale-105 transition-transform">
+                                          {getFileIcon(doc.file_name)}
+                                        </span>
+                                        <div className="overflow-hidden">
+                                          <p className="text-xs font-semibold text-slate-800 group-hover:text-blue-600 truncate transition-colors">
+                                            {doc.file_name}
+                                          </p>
+                                          <p className="text-[10px] text-slate-400 mt-0.5">
+                                            {(doc.file_size / 1024).toFixed(1)} KB • {new Date(doc.created_at).toLocaleDateString()}
+                                          </p>
+                                        </div>
+                                      </a>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteExistingDocument(doc)}
+                                        disabled={deletingDocId === doc.id}
+                                        className="px-2.5 py-1 text-[11px] font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-md transition-colors flex-shrink-0 disabled:opacity-50"
+                                        title="Delete document permanently"
+                                      >
+                                        {deletingDocId === doc.id ? "Deleting..." : "Delete"}
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="text-xs text-slate-400 italic py-4 text-center">
+                                  No {bucket.key.toLowerCase()} uploaded.
+                                </p>
+                              )}
                             </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="p-6 text-center border border-slate-200/80 bg-white rounded-xl">
-                          <p className="text-sm font-medium text-slate-400">No existing documents uploaded for this site.</p>
-                        </div>
-                      )}
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
                   
-                  {/* Upload New Documents Section */}
+                  {/* Upload New Documents Section with Bucket Selector ("Lease Agreements" vs "Other") */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-2">
-                    <div>
-                      <h5 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Add New Documents</h5>
+                    <div className="space-y-4">
+                      <h5 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                        1. Select Target Bucket & Add Files
+                      </h5>
+                      
+                      {/* Bucket Toggle for Manual Uploads */}
+                      <div className="flex bg-slate-200/70 p-1 rounded-lg border border-slate-200">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedUploadBucket("Lease Agreements")}
+                          className={`flex-1 py-2 text-xs font-bold rounded-md transition-all flex items-center justify-center gap-1.5 ${
+                            selectedUploadBucket === "Lease Agreements"
+                              ? "bg-white text-blue-700 shadow-sm border border-slate-200/60"
+                              : "text-slate-600 hover:text-slate-900"
+                          }`}
+                        >
+                          <span>📜</span> Lease Agreements
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedUploadBucket("Other")}
+                          className={`flex-1 py-2 text-xs font-bold rounded-md transition-all flex items-center justify-center gap-1.5 ${
+                            selectedUploadBucket === "Other"
+                              ? "bg-white text-blue-700 shadow-sm border border-slate-200/60"
+                              : "text-slate-600 hover:text-slate-900"
+                          }`}
+                        >
+                          <span>📁</span> Other
+                        </button>
+                      </div>
+
                       <div 
                         className="border-2 border-dashed border-blue-200 bg-blue-50/30 rounded-xl p-8 text-center cursor-pointer hover:bg-blue-50/70 hover:border-blue-300 transition-colors"
                         onClick={() => fileInputRef.current?.click()}
                       >
-                        <div className="text-3xl mb-3">📁</div>
-                        <p className="text-sm font-bold text-slate-700">Click to Select Documents</p>
-                        <p className="text-xs text-slate-500 mt-1 max-w-[250px] mx-auto">Upload Deeds, Commercial Leases, Floorplans, and Site Photos (PDF, Word, Excel, JPG, PNG).</p>
+                        <div className="text-3xl mb-3">
+                          {selectedUploadBucket === "Lease Agreements" ? "📜" : "📁"}
+                        </div>
+                        <p className="text-sm font-bold text-slate-700">
+                          Click to Add to &ldquo;{selectedUploadBucket}&rdquo;
+                        </p>
+                        <p className="text-xs text-slate-500 mt-1 max-w-[260px] mx-auto">
+                          {selectedUploadBucket === "Lease Agreements"
+                            ? "Upload commercial leases, addendums, and renewal schedules."
+                            : "Upload deeds, floorplans, invoices, permits, or site photos."}
+                        </p>
                         <input type="file" multiple ref={fileInputRef} className="hidden" onChange={handleFileSelect} />
                       </div>
                     </div>
 
                     <div>
-                      <h5 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">New Files Queued for Upload</h5>
+                      <h5 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">
+                        2. New Files Queued for Upload ({pendingFiles.length})
+                      </h5>
                       {pendingFiles.length > 0 ? (
-                        <ul className="space-y-2">
-                          {pendingFiles.map((file, idx) => (
-                            <li key={idx} className="flex justify-between items-center bg-white border border-slate-200 p-2.5 rounded-lg shadow-sm">
-                              <div className="flex items-center overflow-hidden mr-3">
-                                <span className="text-lg mr-2">{getFileIcon(file.name)}</span>
-                                <span className="text-sm font-semibold text-slate-800 truncate" title={file.name}>{file.name}</span>
+                        <ul className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
+                          {pendingFiles.map((item, idx) => (
+                            <li key={idx} className="flex items-center justify-between bg-white border border-slate-200 p-2.5 rounded-lg shadow-sm gap-2">
+                              <div className="flex items-center overflow-hidden flex-1">
+                                <span className="text-lg mr-2 flex-shrink-0">{getFileIcon(item.file.name)}</span>
+                                <span className="text-xs font-semibold text-slate-800 truncate" title={item.file.name}>
+                                  {item.file.name}
+                                </span>
                               </div>
-                              <button type="button" onClick={() => removePendingFile(idx)} className="text-slate-400 hover:text-rose-500 transition-colors p-1">
+                              <select
+                                value={item.category}
+                                onChange={(e) => updatePendingFileCategory(idx, e.target.value as ManualDocBucket)}
+                                className="text-[11px] font-bold bg-slate-50 border border-slate-200 text-slate-700 rounded px-2 py-1 outline-none cursor-pointer"
+                                title="Change target bucket"
+                              >
+                                <option value="Lease Agreements">Lease Agreements</option>
+                                <option value="Other">Other</option>
+                              </select>
+                              <button
+                                type="button"
+                                onClick={() => removePendingFile(idx)}
+                                className="text-slate-400 hover:text-rose-500 transition-colors p-1 flex-shrink-0"
+                                title="Remove from queue"
+                              >
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                               </button>
                             </li>
                           ))}
                         </ul>
                       ) : (
-                        <div className="h-32 flex items-center justify-center border border-slate-100 bg-slate-50 rounded-xl">
-                          <p className="text-sm font-medium text-slate-400">No new files selected.</p>
+                        <div className="h-44 flex items-center justify-center border border-slate-200/80 bg-white rounded-xl">
+                          <p className="text-xs font-medium text-slate-400">No new files queued for upload.</p>
                         </div>
                       )}
                     </div>
