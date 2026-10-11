@@ -16,8 +16,11 @@ export async function POST(req: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const base64Data = Buffer.from(arrayBuffer).toString("base64");
 
-    // Gemini 1.5 Pro supports native multimodality (PDFs, Images, Text)
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+    // Updated to Gemini 3.1 Pro Preview with strict JSON output mode
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-3.1-pro-preview",
+      generationConfig: { responseMimeType: "application/json" }
+    });
 
     const prompt = `
       You are an expert real estate lease abstraction AI.
@@ -56,7 +59,7 @@ export async function POST(req: NextRequest) {
       {
         inlineData: {
           data: base64Data,
-          mimeType: file.type,
+          mimeType: file.type || "application/pdf",
         },
       },
     ]);
