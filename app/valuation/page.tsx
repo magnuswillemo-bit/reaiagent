@@ -57,6 +57,14 @@ export default function ValuationPage() {
     setPdfSuccess(false);
   }, [selectedSiteId]);
 
+  const cleanMarkdownText = (str: string) => {
+    return str
+      .replace(/\\\$/g, "$")
+      .replace(/\*\*/g, "")
+      .replace(/\*/g, "")
+      .trim();
+  };
+
   const handleRunValuation = async () => {
     if (!selectedSiteId) return;
     
@@ -128,68 +136,225 @@ export default function ValuationPage() {
     setError(null);
     
     try {
-      // Switch to html-to-image to perfectly support modern CSS color functions like lab()
-      const { toPng } = await import('html-to-image');
-      const { jsPDF } = await import('jspdf');
-
-      const reportElement = document.getElementById("valuation-report-content");
-      if (!reportElement) throw new Error("Report content not found");
-
-      // Temporarily adjust padding to ensure clean PDF edges
-      const originalPadding = reportElement.style.padding;
-      reportElement.style.padding = "24px";
-      
-      const imgData = await toPng(reportElement, { 
-        pixelRatio: 2,
-        backgroundColor: '#ffffff'
-      });
-      
-      reportElement.style.padding = originalPadding; // Reset
-
-      const pdf = new jsPDF("p", "mm", "a4");
-      
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = pdf.internal.pageSize.getHeight();
-      const imgProps = pdf.getImageProperties(imgData);
-      const imgHeight = (imgProps.height * pdfWidth) / imgProps.width;
-      
-      let heightLeft = imgHeight;
-      let position = 0;
-
-      // Handle multi-page generation
-      pdf.addImage(imgData, "PNG", 0, position, pdfWidth, imgHeight);
-      heightLeft -= pdfHeight;
-
-      while (heightLeft >= 0) {
-        position = heightLeft - imgHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, "PNG", 0, position, pdfWidth, imgHeight);
-        heightLeft -= pdfHeight;
-      }
-      
-      const pdfBlob = pdf.output("blob");
-      
-      // Determine Naming Convention
+      const { jsPDF } = await import("jspdf");
       const targetSite = sites.find(s => s.id.toString() === selectedSiteId);
-      const dateStr = new Date().toISOString().split('T')[0];
-      const reportType = contractFilter === "Owned" ? "FMV" : "FMR";
-      const fileName = `${dateStr}_${targetSite.site_code}_${reportType}_Report.pdf`;
+      if (!targetSite) throw new Error("Target site not found");
 
-      // Upload Blob to Supabase Storage
+      const doc = new jsPDF("p", "mm", "a4");
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 18;
+      const contentWidth = pageWidth - margin * 2;
+      const bottomLimit = pageHeight - 20;
+      let y = 0;
+
+      const ensureSpace = (neededHeight: number) => {
+        if (y + neededHeight > bottomLimit) {
+          doc.addPage();
+          y = 22;
+        }
+      };
+
+      // 1. Top Corporate Header Banner
+      doc.setFillColor(15, 23, 42); // Slate-900
+      doc.rect(0, 0, pageWidth, 34, "F");
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      doc.setTextColor(255, 255, 255);
+      const reportTitle = contractFilter === "Owned"
+        ? "FAIR MARKET VALUATION REPORT"
+        : "FAIR MARKET RENT ASSESSMENT";
+      doc.text(reportTitle, margin, 15);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9.5);
+      doc.setTextColor(148, 163, 184); // Slate-400
+      const dateFormatted = new Date().toISOString().split("T")[0];
+      doc.text(
+        `Site: ${targetSite.site_code} — ${targetSite.common_name || ""} (${targetSite.city || ""}, ${targetSite.country || ""})`,
+        margin,
+        23
+      );
+      doc.text(`Report Date: ${dateFormatted}`, pageWidth - margin, 23, { align: "right" });
+
+      y = 44;
+
+      // 2. Key Valuation & Confidence Summary Box
+      const currency = targetSite.local_currency || "USD";
+      const valLabel = contractFilter === "Owned" ? "ESTIMATED CAPITAL VALUE" : "ESTIMATED ANNUAL FAIR MARKET RENT";
+      const valFormatted = estimatedValue ? `${estimatedValue.toLocaleString()} ${currency}` : "N/A";
+
+      const confExplanationText = cleanMarkdownText(confidenceExplanation || "");
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      const confLines = doc.splitTextToSize(confExplanationText, contentWidth - 12);
+      const summaryBoxHeight = Math.max(32, 24 + confLines.length * 4.5);
+
+      doc.setFillColor(248, 250, 252); // Slate-50
+      doc.setDrawColor(226, 232, 240); // Slate-200
+      doc.roundedRect(margin, y, contentWidth, summaryBoxHeight, 3, 3, "FD");
+
+      // Estimated Value (Left)
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.setTextColor(100, 116, 139);
+      doc.text(valLabel, margin + 6, y + 8);
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      doc.setTextColor(15, 23, 42);
+      doc.text(valFormatted, margin + 6, y + 16);
+
+      // Confidence Pill (Right)
+      if (confidenceRating) {
+        const ratingUpper = confidenceRating.toUpperCase();
+        let badgeBg: [number, number, number] = [226, 232, 240];
+        let badgeText: [number, number, number] = [51, 65, 85];
+        if (ratingUpper === "HIGH") {
+          badgeBg = [209, 250, 229];
+          badgeText = [6, 95, 70];
+        } else if (ratingUpper === "MEDIUM") {
+          badgeBg = [254, 243, 199];
+          badgeText = [146, 64, 14];
+        } else if (ratingUpper === "LOW") {
+          badgeBg = [254, 226, 226];
+          badgeText = [153, 27, 27];
+        }
+
+        const pillWidth = 42;
+        doc.setFillColor(...badgeBg);
+        doc.roundedRect(pageWidth - margin - pillWidth - 6, y + 5, pillWidth, 8, 2, 2, "F");
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8);
+        doc.setTextColor(...badgeText);
+        doc.text(
+          `CONFIDENCE: ${ratingUpper}`,
+          pageWidth - margin - 6 - pillWidth / 2,
+          y + 10.3,
+          { align: "center" }
+        );
+      }
+
+      // Confidence Explanation
+      if (confLines.length > 0) {
+        doc.setDrawColor(226, 232, 240);
+        doc.line(margin + 6, y + 20, pageWidth - margin - 6, y + 20);
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(9);
+        doc.setTextColor(71, 85, 105);
+        doc.text(confLines, margin + 6, y + 25.5);
+      }
+
+      y += summaryBoxHeight + 10;
+
+      // 3. Render Assessment Sections Cleanly
+      const lines = assessment.split("\n");
+
+      for (const rawLine of lines) {
+        const trimmed = rawLine.trim();
+        if (!trimmed) {
+          y += 2;
+          continue;
+        }
+
+        // Section Heading (## or ###)
+        if (trimmed.startsWith("## ") || trimmed.startsWith("### ")) {
+          const headingText = cleanMarkdownText(trimmed.replace(/^#+\s*/, ""));
+          ensureSpace(14);
+          y += 4;
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(12);
+          doc.setTextColor(15, 23, 42);
+          doc.text(headingText, margin, y);
+          y += 2;
+          doc.setDrawColor(226, 232, 240);
+          doc.line(margin, y, pageWidth - margin, y);
+          y += 6;
+          continue;
+        }
+
+        // Bullet Points (* or - or numbered 1.)
+        if (trimmed.startsWith("* ") || trimmed.startsWith("- ") || /^\d+\.\s/.test(trimmed)) {
+          const isNumbered = /^\d+\.\s/.test(trimmed);
+          const prefix = isNumbered ? trimmed.match(/^\d+\./)?.[0] || "•" : "•";
+          const bodyContent = isNumbered
+            ? trimmed.replace(/^\d+\.\s*/, "")
+            : trimmed.substring(2);
+
+          const cleanedBullet = cleanMarkdownText(bodyContent);
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(9.5);
+          const wrappedBullet = doc.splitTextToSize(cleanedBullet, contentWidth - 8);
+          const blockHeight = wrappedBullet.length * 4.8 + 1.5;
+
+          ensureSpace(blockHeight);
+
+          doc.setFont("helvetica", "bold");
+          doc.setTextColor(37, 99, 235); // Blue accent bullet
+          doc.text(prefix, margin + 1, y);
+
+          doc.setFont("helvetica", "normal");
+          doc.setTextColor(51, 65, 85);
+          doc.text(wrappedBullet, margin + 7, y);
+          y += blockHeight;
+          continue;
+        }
+
+        // Regular Paragraph
+        const cleanedPara = cleanMarkdownText(trimmed);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9.5);
+        doc.setTextColor(51, 65, 85);
+        const wrappedPara = doc.splitTextToSize(cleanedPara, contentWidth);
+        const paraHeight = wrappedPara.length * 4.8 + 2.5;
+
+        ensureSpace(paraHeight);
+        doc.text(wrappedPara, margin, y);
+        y += paraHeight;
+      }
+
+      // 4. Add Footers & Page Numbers to All Pages
+      const totalPages = doc.getNumberOfPages();
+      for (let p = 1; p <= totalPages; p++) {
+        doc.setPage(p);
+        doc.setDrawColor(226, 232, 240);
+        doc.line(margin, pageHeight - 14, pageWidth - margin, pageHeight - 14);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.setTextColor(148, 163, 184);
+        doc.text(
+          `reAIgent Portfolio Intelligence • ${targetSite.site_code} Valuation Report`,
+          margin,
+          pageHeight - 9
+        );
+        doc.text(`Page ${p} of ${totalPages}`, pageWidth - margin, pageHeight - 9, {
+          align: "right",
+        });
+      }
+
+      // 5. Determine Naming Convention, Trigger Download & Upload to Supabase
+      const reportType = contractFilter === "Owned" ? "FMV" : "FMR";
+      const fileName = `${dateFormatted}_${targetSite.site_code}_${reportType}_Report.pdf`;
+
+      // Trigger local download so user immediately gets the clean PDF
+      doc.save(fileName);
+
+      const pdfBlob = doc.output("blob");
+
       const { error: uploadError } = await supabase.storage
-        .from('documents')
-        .upload(fileName, pdfBlob, { contentType: 'application/pdf', upsert: true });
+        .from("documents")
+        .upload(fileName, pdfBlob, { contentType: "application/pdf", upsert: true });
 
       if (uploadError) throw uploadError;
 
-      // Get public URL and save to Document Repository
-      const { data: publicUrlData } = supabase.storage.from('documents').getPublicUrl(fileName);
+      const { data: publicUrlData } = supabase.storage.from("documents").getPublicUrl(fileName);
 
-      const { error: dbError } = await supabase.from('site_documents').insert([{
+      const { error: dbError } = await supabase.from("site_documents").insert([{
         site_id: targetSite.id,
         file_name: fileName,
         file_size: pdfBlob.size,
-        file_type: 'application/pdf',
+        file_type: "application/pdf",
         file_url: publicUrlData.publicUrl,
         uploaded_by: "System"
       }]);
@@ -216,11 +381,12 @@ export default function ValuationPage() {
 
   const formatAssessment = (text: string) => {
     return text.split('\n').map((line, i) => {
-      if (line.startsWith('## ')) return <h3 key={i} className="text-lg font-bold text-slate-900 mt-6 mb-2">{line.replace('## ', '')}</h3>;
-      if (line.startsWith('**') && line.includes('**:')) return <p key={i} className="mb-2"><strong className="text-slate-800">{line.split('**:')[0].replace('**', '')}:</strong>{line.split('**:')[1]}</p>;
-      if (line.startsWith('* ') || line.startsWith('- ')) return <li key={i} className="ml-4 mb-1 text-slate-700">{line.substring(2).replace(/\*\*/g, '')}</li>;
-      if (line.trim() === '') return <br key={i} />;
-      return <p key={i} className="mb-2 text-slate-700">{line.replace(/\*\*/g, '')}</p>;
+      const cleanLine = line.replace(/\\\$/g, '$');
+      if (cleanLine.startsWith('## ')) return <h3 key={i} className="text-lg font-bold text-slate-900 mt-6 mb-2">{cleanLine.replace('## ', '')}</h3>;
+      if (cleanLine.startsWith('**') && cleanLine.includes('**:')) return <p key={i} className="mb-2"><strong className="text-slate-800">{cleanLine.split('**:')[0].replace(/\*\*/g, '')}:</strong>{cleanLine.split('**:')[1].replace(/\*\*/g, '')}</p>;
+      if (cleanLine.startsWith('* ') || cleanLine.startsWith('- ')) return <li key={i} className="ml-4 mb-1 text-slate-700">{cleanLine.substring(2).replace(/\*\*/g, '')}</li>;
+      if (cleanLine.trim() === '') return <br key={i} />;
+      return <p key={i} className="mb-2 text-slate-700">{cleanLine.replace(/\*\*/g, '')}</p>;
     });
   };
 
@@ -385,20 +551,17 @@ export default function ValuationPage() {
                     </div>
                   )}
                   
-                  {/* The Document Wrapper for PDF Generation */}
                   <div id="valuation-report-content" className="bg-white rounded-lg pt-2 pb-6 px-1">
-                    
-                    {/* Clean Header specifically designed to look good on the PDF */}
                     <div className="mb-8 pb-4 border-b border-slate-200">
                       <h2 className="text-2xl font-bold text-slate-900">
                         {contractFilter === "Owned" ? "Fair Market Valuation" : "Fair Market Rent"} Assessment
                       </h2>
                       <p className="text-sm font-semibold text-slate-500 mt-1">
-                        Site Identification: <span className="text-slate-800">{sites.find(s => s.id.toString() === selectedSiteId)?.site_code}</span> • Report Date: <span className="text-slate-800">{new Date().toLocaleDateString()}</span>
+                        Site Identification: <span className="text-slate-800 mr-4">{sites.find(s => s.id.toString() === selectedSiteId)?.site_code}</span>
+                        Report Date: <span className="text-slate-800">{new Date().toLocaleDateString()}</span>
                       </p>
                     </div>
 
-                    {/* Confidence Rating Block */}
                     {confidenceRating && (
                       <div className={`mb-8 p-5 rounded-xl border flex flex-col sm:flex-row gap-5 items-start sm:items-center ${getConfidenceColors(confidenceRating)}`}>
                         <div className="flex-shrink-0 min-w-[120px]">

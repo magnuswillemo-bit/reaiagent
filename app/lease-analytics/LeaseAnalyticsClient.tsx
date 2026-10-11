@@ -160,81 +160,342 @@ export default function LeaseAnalyticsClient() {
     if (!selectedSiteId || !activeReport) return;
     setIsSavingPdf(true);
     setError(null);
-
-    // CSS Interceptor to prevent SecurityErrors from Browser Extensions (e.g. Grammarly, AdBlockers)
-    const originalCssRules = Object.getOwnPropertyDescriptor(CSSStyleSheet.prototype, 'cssRules');
-    if (originalCssRules) {
-      Object.defineProperty(CSSStyleSheet.prototype, 'cssRules', {
-        get() {
-          try {
-            return originalCssRules.get?.call(this) || [];
-          } catch (e) {
-            return []; // Fail gracefully instead of crashing
-          }
-        },
-        configurable: true
-      });
-    }
     
     try {
-      const { toJpeg } = await import('html-to-image');
-      const { jsPDF } = await import('jspdf');
-
-      const reportElement = document.getElementById("analytics-report-content");
-      if (!reportElement) throw new Error("Report content not found");
-
-      const originalPadding = reportElement.style.padding;
-      reportElement.style.padding = "24px";
-      
-      // Use JPEG with lower pixelRatio to prevent Massive File Size limits in Supabase
-      const imgData = await toJpeg(reportElement, { 
-        quality: 0.85,
-        pixelRatio: 1.5,
-        backgroundColor: '#ffffff'
-      });
-      
-      reportElement.style.padding = originalPadding; 
-
-      const pdf = new jsPDF("p", "mm", "a4");
-      
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = pdf.internal.pageSize.getHeight();
-      const imgProps = pdf.getImageProperties(imgData);
-      const imgHeight = (imgProps.height * pdfWidth) / imgProps.width;
-      
-      let heightLeft = imgHeight;
-      let position = 0;
-
-      // Add compressed JPEG image to PDF
-      pdf.addImage(imgData, "JPEG", 0, position, pdfWidth, imgHeight);
-      heightLeft -= pdfHeight;
-
-      while (heightLeft >= 0) {
-        position = heightLeft - imgHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, "JPEG", 0, position, pdfWidth, imgHeight);
-        heightLeft -= pdfHeight;
-      }
-      
-      const pdfBlob = pdf.output("blob");
-      
+      const { jsPDF } = await import("jspdf");
       const targetSite = sites.find(s => s.id.toString() === selectedSiteId);
-      const dateStr = new Date().toISOString().split('T')[0];
-      const fileName = `${dateStr}_${targetSite?.site_code || 'Unknown'}_LeaseAnalyticsReport.pdf`;
+      const siteCode = targetSite?.site_code || "Unknown";
+      const dateStr = new Date().toISOString().split("T")[0];
+
+      const doc = new jsPDF("p", "mm", "a4");
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 16;
+      const contentWidth = pageWidth - margin * 2;
+      const bottomLimit = pageHeight - 20;
+      let y = 0;
+
+      const ensureSpace = (neededHeight: number) => {
+        if (y + neededHeight > bottomLimit) {
+          doc.addPage();
+          y = 20;
+        }
+      };
+
+      // 1. Top Corporate Header Banner
+      doc.setFillColor(15, 23, 42); // Slate-900
+      doc.rect(0, 0, pageWidth, 32, "F");
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      doc.setTextColor(255, 255, 255);
+      doc.text("LEASE ANALYTICS & RISK REPORT", margin, 14);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9.5);
+      doc.setTextColor(148, 163, 184);
+      doc.text(
+        `Site: ${siteCode} — ${targetSite?.common_name || ""} (${targetSite?.city || ""}, ${targetSite?.country || ""})`,
+        margin,
+        22
+      );
+      doc.text(`Generated: ${dateStr}`, pageWidth - margin, 22, { align: "right" });
+
+      y = 42;
+
+      // 2. Executive Summary Heading
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(13);
+      doc.setTextColor(15, 23, 42);
+      doc.text("Executive Summary", margin, y);
+      y += 2;
+      doc.setDrawColor(226, 232, 240);
+      doc.line(margin, y, pageWidth - margin, y);
+      y += 6;
+
+      // Helper to render Strengths & Weaknesses boxes cleanly
+      const renderSummaryBlock = (
+        title: string,
+        items: string[],
+        bgRgb: [number, number, number],
+        borderRgb: [number, number, number],
+        titleRgb: [number, number, number]
+      ) => {
+        if (!items || items.length === 0) return;
+
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+
+        const wrappedItems = items.map(item =>
+          doc.splitTextToSize(item.replace(/\\\$/g, "$"), contentWidth - 14)
+        );
+        const totalLines = wrappedItems.reduce((acc, lines) => acc + lines.length, 0);
+        const boxHeight = 14 + totalLines * 4.5 + items.length * 2;
+
+        ensureSpace(boxHeight);
+
+        doc.setFillColor(...bgRgb);
+        doc.setDrawColor(...borderRgb);
+        doc.roundedRect(margin, y, contentWidth, boxHeight, 2.5, 2.5, "FD");
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9.5);
+        doc.setTextColor(...titleRgb);
+        doc.text(title.toUpperCase(), margin + 5, y + 7);
+
+        let itemY = y + 13;
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+        doc.setTextColor(30, 41, 59);
+
+        wrappedItems.forEach(lines => {
+          doc.setFont("helvetica", "bold");
+          doc.text("•", margin + 5, itemY);
+          doc.setFont("helvetica", "normal");
+          doc.text(lines, margin + 10, itemY);
+          itemY += lines.length * 4.5 + 2;
+        });
+
+        y += boxHeight + 5;
+      };
+
+      renderSummaryBlock(
+        "Contract Strengths",
+        activeReport.executive_summary?.strengths || [],
+        [240, 253, 244], // Emerald-50
+        [187, 247, 208], // Emerald-200
+        [6, 95, 70]      // Emerald-800
+      );
+
+      renderSummaryBlock(
+        "Contract Weaknesses",
+        activeReport.executive_summary?.weaknesses || [],
+        [255, 241, 242], // Rose-50
+        [254, 205, 211], // Rose-200
+        [159, 18, 57]    // Rose-800
+      );
+
+      // 3. Pre-Negotiation Playbook (2x2 Clean Grid instead of cramped 4 columns)
+      const playbook = activeReport.executive_summary?.negotiation_playbook;
+      if (playbook) {
+        const categories = [
+          { label: "MUST HAVES", list: playbook.must_haves || [] },
+          { label: "THINGS TO REMOVE", list: playbook.things_to_remove || [] },
+          { label: "THINGS TO ADD", list: playbook.things_to_add || [] },
+          { label: "CONSIDERATIONS", list: playbook.things_to_consider || [] },
+        ];
+
+        ensureSpace(25);
+        y += 3;
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(12);
+        doc.setTextColor(15, 23, 42);
+        doc.text("Pre-Negotiation Playbook", margin, y);
+        y += 2;
+        doc.setDrawColor(226, 232, 240);
+        doc.line(margin, y, pageWidth - margin, y);
+        y += 5;
+
+        const colGap = 6;
+        const colWidth = (contentWidth - colGap) / 2;
+
+        for (let i = 0; i < categories.length; i += 2) {
+          const leftCat = categories[i];
+          const rightCat = categories[i + 1];
+
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(8.5);
+
+          const leftWrapped = leftCat.list.map((it: string) =>
+            doc.splitTextToSize(it.replace(/\\\$/g, "$"), colWidth - 12)
+          );
+          const rightWrapped = rightCat.list.map((it: string) =>
+            doc.splitTextToSize(it.replace(/\\\$/g, "$"), colWidth - 12)
+          );
+
+          const leftHeight =
+            12 +
+            leftWrapped.reduce((a: number, b: string[]) => a + b.length * 4.2 + 2, 0);
+          const rightHeight =
+            12 +
+            rightWrapped.reduce((a: number, b: string[]) => a + b.length * 4.2 + 2, 0);
+          const rowHeight = Math.max(leftHeight, rightHeight, 22);
+
+          ensureSpace(rowHeight + 4);
+
+          // Draw Left Card
+          doc.setFillColor(30, 41, 59); // Slate-800
+          doc.roundedRect(margin, y, colWidth, rowHeight, 2, 2, "F");
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(8.5);
+          doc.setTextColor(147, 197, 253); // Blue-300
+          doc.text(leftCat.label, margin + 5, y + 6.5);
+
+          let ly = y + 12;
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(8.5);
+          doc.setTextColor(241, 245, 249);
+          leftWrapped.forEach((lines: string[]) => {
+            doc.text("•", margin + 5, ly);
+            doc.text(lines, margin + 9, ly);
+            ly += lines.length * 4.2 + 2;
+          });
+
+          // Draw Right Card
+          const rightX = margin + colWidth + colGap;
+          doc.setFillColor(30, 41, 59);
+          doc.roundedRect(rightX, y, colWidth, rowHeight, 2, 2, "F");
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(8.5);
+          doc.setTextColor(147, 197, 253);
+          doc.text(rightCat.label, rightX + 5, y + 6.5);
+
+          let ry = y + 12;
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(8.5);
+          doc.setTextColor(241, 245, 249);
+          rightWrapped.forEach((lines: string[]) => {
+            doc.text("•", rightX + 5, ry);
+            doc.text(lines, rightX + 9, ry);
+            ry += lines.length * 4.2 + 2;
+          });
+
+          y += rowHeight + 5;
+        }
+      }
+
+      // 4. 15-Point Deep Dive Section (Each Clause Card Kept Intact Across Page Splits)
+      ensureSpace(25);
+      y += 4;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(13);
+      doc.setTextColor(15, 23, 42);
+      doc.text("15-Point Clause Deep Dive", margin, y);
+      y += 2;
+      doc.setDrawColor(226, 232, 240);
+      doc.line(margin, y, pageWidth - margin, y);
+      y += 6;
+
+      const clauses = activeReport.clause_analysis || [];
+      const innerColGap = 6;
+      const innerColWidth = (contentWidth - 12 - innerColGap) / 2;
+
+      clauses.forEach((clause: any) => {
+        const extractedText = (clause.extracted_terms || "N/A").replace(/\\\$/g, "$");
+        const riskText = (clause.risk_analysis || "N/A").replace(/\\\$/g, "$");
+
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8.8);
+        const extractedLines = doc.splitTextToSize(extractedText, innerColWidth);
+        const riskLines = doc.splitTextToSize(riskText, innerColWidth);
+
+        const maxLines = Math.max(extractedLines.length, riskLines.length);
+        const cardHeight = 18 + maxLines * 4.3 + 6;
+
+        // Prevent splitting any clause card across two pages
+        ensureSpace(cardHeight + 4);
+
+        // Card Outer Frame
+        doc.setFillColor(255, 255, 255);
+        doc.setDrawColor(203, 213, 225);
+        doc.roundedRect(margin, y, contentWidth, cardHeight, 2, 2, "FD");
+
+        // Card Top Header Strip
+        doc.setFillColor(248, 250, 252);
+        doc.rect(margin + 0.3, y + 0.3, contentWidth - 0.6, 10, "F");
+        doc.setDrawColor(226, 232, 240);
+        doc.line(margin, y + 10.3, pageWidth - margin, y + 10.3);
+
+        // Clause Title
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9.5);
+        doc.setTextColor(15, 23, 42);
+        doc.text(`${clause.id}. ${clause.title}`, margin + 5, y + 6.8);
+
+        // Risk Badge Pill
+        const level = (clause.risk_level || "Info").toUpperCase();
+        let pillBg: [number, number, number] = [241, 245, 249];
+        let pillFg: [number, number, number] = [71, 85, 105];
+        if (level.includes("HIGH")) {
+          pillBg = [254, 226, 226];
+          pillFg = [153, 27, 27];
+        } else if (level.includes("MEDIUM")) {
+          pillBg = [254, 243, 199];
+          pillFg = [146, 64, 14];
+        } else if (level.includes("LOW")) {
+          pillBg = [209, 250, 229];
+          pillFg = [6, 95, 70];
+        }
+
+        const badgeW = 26;
+        doc.setFillColor(...pillBg);
+        doc.roundedRect(pageWidth - margin - badgeW - 4, y + 2.2, badgeW, 6, 1.5, 1.5, "F");
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(7);
+        doc.setTextColor(...pillFg);
+        doc.text(`${level} RISK`, pageWidth - margin - 4 - badgeW / 2, y + 6.2, {
+          align: "center",
+        });
+
+        // Two-Column Body: Extracted Terms (Left) | AI Risk Analysis (Right)
+        const leftColX = margin + 5;
+        const rightColX = margin + 5 + innerColWidth + innerColGap;
+        const subHeaderY = y + 15.5;
+        const bodyStartY = y + 20.5;
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(7.5);
+        doc.setTextColor(100, 116, 139);
+        doc.text("EXTRACTED TERMS", leftColX, subHeaderY);
+        doc.text("AI RISK ANALYSIS", rightColX, subHeaderY);
+
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8.8);
+        doc.setTextColor(51, 65, 85);
+        doc.text(extractedLines, leftColX, bodyStartY);
+        doc.text(riskLines, rightColX, bodyStartY);
+
+        y += cardHeight + 4.5;
+      });
+
+      // 5. Add Page Numbers & Footers Across All Pages
+      const totalPages = doc.getNumberOfPages();
+      for (let p = 1; p <= totalPages; p++) {
+        doc.setPage(p);
+        doc.setDrawColor(226, 232, 240);
+        doc.line(margin, pageHeight - 13, pageWidth - margin, pageHeight - 13);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.setTextColor(148, 163, 184);
+        doc.text(
+          `reAIgent Portfolio Intelligence • ${siteCode} Lease Analytics Report`,
+          margin,
+          pageHeight - 8.5
+        );
+        doc.text(`Page ${p} of ${totalPages}`, pageWidth - margin, pageHeight - 8.5, {
+          align: "right",
+        });
+      }
+
+      // 6. Trigger Browser Download & Upload to Supabase Vault
+      const fileName = `${dateStr}_${siteCode}_LeaseAnalyticsReport.pdf`;
+      doc.save(fileName);
+
+      const pdfBlob = doc.output("blob");
 
       const { error: uploadError } = await supabase.storage
-        .from('documents')
-        .upload(fileName, pdfBlob, { contentType: 'application/pdf', upsert: true });
+        .from("documents")
+        .upload(fileName, pdfBlob, { contentType: "application/pdf", upsert: true });
 
       if (uploadError) throw uploadError;
 
-      const { data: publicUrlData } = supabase.storage.from('documents').getPublicUrl(fileName);
+      const { data: publicUrlData } = supabase.storage.from("documents").getPublicUrl(fileName);
 
-      const { error: dbError } = await supabase.from('site_documents').insert([{
+      const { error: dbError } = await supabase.from("site_documents").insert([{
         site_id: targetSite?.id || Number(selectedSiteId),
         file_name: fileName,
         file_size: pdfBlob.size,
-        file_type: 'application/pdf',
+        file_type: "application/pdf",
         file_url: publicUrlData.publicUrl,
         uploaded_by: user?.email || "System"
       }]);
@@ -246,10 +507,6 @@ export default function LeaseAnalyticsClient() {
       console.error(err);
       setError(`Failed to save PDF: ${err.message}`);
     } finally {
-      // Restore standard CSS Rules to the browser
-      if (originalCssRules) {
-        Object.defineProperty(CSSStyleSheet.prototype, 'cssRules', originalCssRules);
-      }
       setIsSavingPdf(false);
     }
   };
@@ -289,7 +546,7 @@ export default function LeaseAnalyticsClient() {
                 >
                   <option value="">-- Choose Target Site --</option>
                   {sites.map(site => (
-                    <option key={site.id} value={site.id}>{site.site_code} - {site.city}</option>
+                    <option key={site.id} value={site.id}>{site.site_code} {site.city}</option>
                   ))}
                 </select>
               </div>
@@ -388,14 +645,6 @@ export default function LeaseAnalyticsClient() {
               {activeReport && !isLoading && (
                 <div id="analytics-report-content" className="space-y-10 animate-in fade-in duration-500 bg-white">
                   
-                  {/* Clean PDF Document Header */}
-                  <div className="border-b border-slate-200 pb-4 hidden print:block">
-                     <h2 className="text-2xl font-bold text-slate-900">Lease Analytics Report</h2>
-                     <p className="text-sm font-semibold text-slate-500 mt-1">
-                        Site Code: <span className="text-slate-800">{sites.find(s => s.id.toString() === selectedSiteId)?.site_code}</span> | Generated: <span className="text-slate-800">{new Date().toLocaleDateString()}</span>
-                     </p>
-                  </div>
-
                   {/* Executive Summary & Header Section */}
                   <div className="space-y-6">
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-200 pb-2 gap-4">
