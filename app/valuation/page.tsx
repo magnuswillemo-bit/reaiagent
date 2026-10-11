@@ -57,8 +57,20 @@ export default function ValuationPage() {
     setPdfSuccess(false);
   }, [selectedSiteId]);
 
+  const stripConfidenceMeta = (text: string) => {
+    return (text || "").replace(/^<!--CONFIDENCE:(.*?)-->\n?/, "");
+  };
+
+  const extractHistoricalConfidence = (val: any): string => {
+    if (val?.confidence_rating) return val.confidence_rating;
+    const raw = val?.assessment || "";
+    const metaMatch = raw.match(/^<!--CONFIDENCE:(.*?)-->/);
+    if (metaMatch && metaMatch[1]) return metaMatch[1].trim();
+    return "N/A";
+  };
+
   const cleanMarkdownText = (str: string) => {
-    return str
+    return stripConfidenceMeta(str)
       .replace(/\\\$/g, "$")
       .replace(/\*\*/g, "")
       .replace(/\*/g, "")
@@ -95,10 +107,15 @@ export default function ValuationPage() {
       setConfidenceRating(data.confidence_rating);
       setConfidenceExplanation(data.confidence_explanation);
 
+      // Embed confidence metadata prefix so history tables always display it without requiring DB schema migrations
+      const storedAssessment = data.confidence_rating
+        ? `<!--CONFIDENCE:${data.confidence_rating}-->\n${data.assessment || ""}`
+        : data.assessment;
+
       const { error: insertError } = await supabase.from("valuations").insert([{
         site_id: targetSite.id,
         contract_type: contractFilter,
-        assessment: data.assessment,
+        assessment: storedAssessment,
         estimated_value: data.estimated_value,
         currency: targetSite.local_currency || "USD"
       }]);
@@ -249,7 +266,7 @@ export default function ValuationPage() {
       y += summaryBoxHeight + 10;
 
       // 3. Render Assessment Sections Cleanly
-      const lines = assessment.split("\n");
+      const lines = stripConfidenceMeta(assessment).split("\n");
 
       for (const rawLine of lines) {
         const trimmed = rawLine.trim();
@@ -337,7 +354,6 @@ export default function ValuationPage() {
       const reportType = contractFilter === "Owned" ? "FMV" : "FMR";
       const fileName = `${dateFormatted}_${targetSite.site_code}_${reportType}_Report.pdf`;
 
-      // Trigger local download so user immediately gets the clean PDF
       doc.save(fileName);
 
       const pdfBlob = doc.output("blob");
@@ -375,12 +391,12 @@ export default function ValuationPage() {
       case 'high': return "bg-emerald-100 text-emerald-800 border-emerald-200";
       case 'medium': return "bg-amber-100 text-amber-800 border-amber-200";
       case 'low': return "bg-rose-100 text-rose-800 border-rose-200";
-      default: return "bg-slate-100 text-slate-800 border-slate-200";
+      default: return "bg-slate-100 text-slate-600 border-slate-200";
     }
   };
 
   const formatAssessment = (text: string) => {
-    return text.split('\n').map((line, i) => {
+    return stripConfidenceMeta(text).split('\n').map((line, i) => {
       const cleanLine = line.replace(/\\\$/g, '$');
       if (cleanLine.startsWith('## ')) return <h3 key={i} className="text-lg font-bold text-slate-900 mt-6 mb-2">{cleanLine.replace('## ', '')}</h3>;
       if (cleanLine.startsWith('**') && cleanLine.includes('**:')) return <p key={i} className="mb-2"><strong className="text-slate-800">{cleanLine.split('**:')[0].replace(/\*\*/g, '')}:</strong>{cleanLine.split('**:')[1].replace(/\*\*/g, '')}</p>;
@@ -587,7 +603,10 @@ export default function ValuationPage() {
         </div>
       </div>
 
+      {/* Bottom History Tables with Confidence Column */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-12">
+        
+        {/* Owned Sites Valuation History */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
           <div className="bg-slate-50 px-6 py-4 border-b border-slate-200">
             <h3 className="font-bold text-slate-800 tracking-tight">Owned Sites Valuation History</h3>
@@ -600,21 +619,30 @@ export default function ValuationPage() {
                     <th className="px-6 py-3.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Date</th>
                     <th className="px-6 py-3.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Site</th>
                     <th className="px-6 py-3.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-right">Value Estimate</th>
+                    <th className="px-6 py-3.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-center">Confidence</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {ownedHistory.map((val, idx) => (
-                    <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-6 py-4 text-slate-500 text-xs">{new Date(val.created_at).toLocaleDateString('en-GB')}</td>
-                      <td className="px-6 py-4">
-                        <p className="font-bold text-slate-800">{val.assets?.site_code}</p>
-                        <p className="text-xs text-slate-500 mt-0.5 truncate max-w-[150px]">{val.assets?.common_name}</p>
-                      </td>
-                      <td className="px-6 py-4 text-right font-medium text-emerald-700">
-                        {val.estimated_value ? `${val.estimated_value.toLocaleString()} ${val.currency}` : "N/A"}
-                      </td>
-                    </tr>
-                  ))}
+                  {ownedHistory.map((val, idx) => {
+                    const conf = extractHistoricalConfidence(val);
+                    return (
+                      <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                        <td className="px-6 py-4 text-slate-500 text-xs">{new Date(val.created_at).toLocaleDateString('en-GB')}</td>
+                        <td className="px-6 py-4">
+                          <p className="font-bold text-slate-800">{val.assets?.site_code}</p>
+                          <p className="text-xs text-slate-500 mt-0.5 truncate max-w-[150px]">{val.assets?.common_name}</p>
+                        </td>
+                        <td className="px-6 py-4 text-right font-medium text-emerald-700">
+                          {val.estimated_value ? `${val.estimated_value.toLocaleString()} ${val.currency}` : "N/A"}
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          <span className={`inline-flex items-center justify-center px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider border min-w-[76px] ${getConfidenceColors(conf)}`}>
+                            {conf}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             ) : (
@@ -623,6 +651,7 @@ export default function ValuationPage() {
           </div>
         </div>
 
+        {/* Rented/Leased Market Assessments */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
           <div className="bg-slate-50 px-6 py-4 border-b border-slate-200">
             <h3 className="font-bold text-slate-800 tracking-tight">Rented/Leased Market Assessments</h3>
@@ -637,12 +666,14 @@ export default function ValuationPage() {
                     <th className="px-6 py-3.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-right">Fair Mkt Rent (AI)</th>
                     <th className="px-6 py-3.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-right">Current Cost</th>
                     <th className="px-6 py-3.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-center">Status</th>
+                    <th className="px-6 py-3.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-center">Confidence</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
                   {rentedHistory.map((val, idx) => {
                     const currentCost = val.assets?.annual_cost;
                     const marketPos = getMarketPosition(currentCost, val.estimated_value);
+                    const conf = extractHistoricalConfidence(val);
                     return (
                       <tr key={idx} className="hover:bg-slate-50 transition-colors">
                         <td className="px-6 py-4 text-slate-500 text-xs">{new Date(val.created_at).toLocaleDateString('en-GB')}</td>
@@ -655,6 +686,11 @@ export default function ValuationPage() {
                         <td className="px-6 py-4 text-center">
                           <span className={`inline-flex items-center justify-center px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider min-w-[100px] ${marketPos.class}`}>
                             {marketPos.label}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          <span className={`inline-flex items-center justify-center px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider border min-w-[76px] ${getConfidenceColors(conf)}`}>
+                            {conf}
                           </span>
                         </td>
                       </tr>
