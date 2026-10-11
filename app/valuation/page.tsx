@@ -603,40 +603,44 @@ export default function ValuationPage() {
         </div>
       </div>
 
-      {/* Bottom History Tables with Confidence Column */}
+      {/* Bottom History Tables — Zero Horizontal Scroll, Vertical Scroll Enabled */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-12">
         
         {/* Owned Sites Valuation History */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
-          <div className="bg-slate-50 px-6 py-4 border-b border-slate-200">
-            <h3 className="font-bold text-slate-800 tracking-tight">Owned Sites Valuation History</h3>
+          <div className="bg-slate-50 px-5 py-4 border-b border-slate-200">
+            <h3 className="font-bold text-slate-800 tracking-tight text-sm">Owned Sites Valuation History</h3>
           </div>
-          <div className="flex-1 overflow-auto max-h-[400px]">
+          <div className="flex-1 overflow-y-auto overflow-x-hidden max-h-[400px]">
             {ownedHistory.length > 0 ? (
-              <table className="w-full text-left text-sm whitespace-nowrap">
+              <table className="w-full text-left table-auto">
                 <thead className="bg-white sticky top-0 border-b border-slate-100 shadow-sm z-10">
                   <tr>
-                    <th className="px-6 py-3.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Date</th>
-                    <th className="px-6 py-3.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Site</th>
-                    <th className="px-6 py-3.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-right">Value Estimate</th>
-                    <th className="px-6 py-3.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-center">Confidence</th>
+                    <th className="px-3 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Date</th>
+                    <th className="px-3 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Site</th>
+                    <th className="px-3 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right">Value Estimate</th>
+                    <th className="px-3 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">Confidence</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-50">
+                <tbody className="divide-y divide-slate-50 text-xs">
                   {ownedHistory.map((val, idx) => {
                     const conf = extractHistoricalConfidence(val);
                     return (
                       <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                        <td className="px-6 py-4 text-slate-500 text-xs">{new Date(val.created_at).toLocaleDateString('en-GB')}</td>
-                        <td className="px-6 py-4">
-                          <p className="font-bold text-slate-800">{val.assets?.site_code}</p>
-                          <p className="text-xs text-slate-500 mt-0.5 truncate max-w-[150px]">{val.assets?.common_name}</p>
+                        <td className="px-3 py-3 text-slate-500 text-[11px] whitespace-nowrap">
+                          {new Date(val.created_at).toLocaleDateString('en-GB')}
                         </td>
-                        <td className="px-6 py-4 text-right font-medium text-emerald-700">
+                        <td className="px-3 py-3 max-w-[140px]">
+                          <p className="font-bold text-slate-800 text-xs leading-tight">{val.assets?.site_code}</p>
+                          <p className="text-[11px] text-slate-500 mt-0.5 truncate" title={val.assets?.common_name}>
+                            {val.assets?.common_name}
+                          </p>
+                        </td>
+                        <td className="px-3 py-3 text-right font-semibold text-emerald-700 text-xs whitespace-nowrap">
                           {val.estimated_value ? `${val.estimated_value.toLocaleString()} ${val.currency}` : "N/A"}
                         </td>
-                        <td className="px-6 py-4 text-center">
-                          <span className={`inline-flex items-center justify-center px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider border min-w-[76px] ${getConfidenceColors(conf)}`}>
+                        <td className="px-3 py-3 text-center whitespace-nowrap">
+                          <span className={`inline-flex items-center justify-center px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border min-w-[60px] ${getConfidenceColors(conf)}`}>
                             {conf}
                           </span>
                         </td>
@@ -653,43 +657,51 @@ export default function ValuationPage() {
 
         {/* Rented/Leased Market Assessments */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
-          <div className="bg-slate-50 px-6 py-4 border-b border-slate-200">
-            <h3 className="font-bold text-slate-800 tracking-tight">Rented/Leased Market Assessments</h3>
+          <div className="bg-slate-50 px-5 py-4 border-b border-slate-200">
+            <h3 className="font-bold text-slate-800 tracking-tight text-sm">Rented/Leased Market Assessments</h3>
           </div>
-          <div className="flex-1 overflow-auto max-h-[400px]">
+          <div className="flex-1 overflow-y-auto overflow-x-hidden max-h-[400px]">
             {rentedHistory.length > 0 ? (
-              <table className="w-full text-left text-sm whitespace-nowrap">
+              <table className="w-full text-left table-auto">
                 <thead className="bg-white sticky top-0 border-b border-slate-100 shadow-sm z-10">
                   <tr>
-                    <th className="px-6 py-3.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Date</th>
-                    <th className="px-6 py-3.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Site</th>
-                    <th className="px-6 py-3.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-right">Fair Mkt Rent (AI)</th>
-                    <th className="px-6 py-3.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-right">Current Cost</th>
-                    <th className="px-6 py-3.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-center">Status</th>
-                    <th className="px-6 py-3.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-center">Confidence</th>
+                    <th className="px-2.5 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Date</th>
+                    <th className="px-2.5 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Site</th>
+                    <th className="px-2.5 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right">Fair Rent (AI)</th>
+                    <th className="px-2.5 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right">Current Cost</th>
+                    <th className="px-2.5 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">Status</th>
+                    <th className="px-2.5 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">Confidence</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-50">
+                <tbody className="divide-y divide-slate-50 text-[11px]">
                   {rentedHistory.map((val, idx) => {
                     const currentCost = val.assets?.annual_cost;
                     const marketPos = getMarketPosition(currentCost, val.estimated_value);
                     const conf = extractHistoricalConfidence(val);
                     return (
                       <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                        <td className="px-6 py-4 text-slate-500 text-xs">{new Date(val.created_at).toLocaleDateString('en-GB')}</td>
-                        <td className="px-6 py-4">
-                          <p className="font-bold text-slate-800">{val.assets?.site_code}</p>
-                          <p className="text-xs text-slate-500 mt-0.5 truncate max-w-[150px]">{val.assets?.common_name}</p>
+                        <td className="px-2.5 py-3 text-slate-500 text-[10px] whitespace-nowrap">
+                          {new Date(val.created_at).toLocaleDateString('en-GB')}
                         </td>
-                        <td className="px-6 py-4 text-right font-medium text-emerald-700">{val.estimated_value ? `${val.estimated_value.toLocaleString()} ${val.currency}` : "N/A"}</td>
-                        <td className="px-6 py-4 text-right font-medium text-slate-700">{currentCost ? `${currentCost.toLocaleString()} ${val.currency}` : "N/A"}</td>
-                        <td className="px-6 py-4 text-center">
-                          <span className={`inline-flex items-center justify-center px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider min-w-[100px] ${marketPos.class}`}>
+                        <td className="px-2.5 py-3 max-w-[105px]">
+                          <p className="font-bold text-slate-800 text-[11px] leading-tight">{val.assets?.site_code}</p>
+                          <p className="text-[10px] text-slate-500 mt-0.5 truncate" title={val.assets?.common_name}>
+                            {val.assets?.common_name}
+                          </p>
+                        </td>
+                        <td className="px-2.5 py-3 text-right font-semibold text-emerald-700 whitespace-nowrap">
+                          {val.estimated_value ? `${val.estimated_value.toLocaleString()} ${val.currency}` : "N/A"}
+                        </td>
+                        <td className="px-2.5 py-3 text-right font-medium text-slate-700 whitespace-nowrap">
+                          {currentCost ? `${currentCost.toLocaleString()} ${val.currency}` : "N/A"}
+                        </td>
+                        <td className="px-2 py-3 text-center whitespace-nowrap">
+                          <span className={`inline-flex items-center justify-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider min-w-[74px] ${marketPos.class}`}>
                             {marketPos.label}
                           </span>
                         </td>
-                        <td className="px-6 py-4 text-center">
-                          <span className={`inline-flex items-center justify-center px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider border min-w-[76px] ${getConfidenceColors(conf)}`}>
+                        <td className="px-2 py-3 text-center whitespace-nowrap">
+                          <span className={`inline-flex items-center justify-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border min-w-[54px] ${getConfidenceColors(conf)}`}>
                             {conf}
                           </span>
                         </td>
