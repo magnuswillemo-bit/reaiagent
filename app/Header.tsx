@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { useState } from "react";
 import { usePathname } from "next/navigation";
 import { useAuth } from "../lib/AuthContext";
@@ -40,17 +39,58 @@ export default function Header() {
     <header className="bg-[#0B132B] text-white shadow-md sticky top-0 z-50 border-b border-slate-800">
       <div className="max-w-[1600px] mx-auto px-4 sm:px-8 h-16 flex items-center justify-between">
         
-        {/* Logo / Brand */}
+        {/* Logo / Brand — Option 1: The Architectural AI Monolith + Styled Wordmark */}
         <Link
           href="/"
           onClick={() => handleNavClick("/")}
-          className="flex items-center gap-3 hover:opacity-90 transition-opacity"
+          className="flex items-center gap-3 group hover:opacity-95 transition-opacity"
         >
-          <div className="w-10 h-10 rounded-lg overflow-hidden shadow-sm border border-slate-700/50 flex-shrink-0">
-            <Image src="/reAIgent_V2.png" alt="reAIgent Logo" width={40} height={40} className="object-cover w-full h-full" priority />
+          <div className="w-10 h-10 rounded-xl overflow-hidden shadow-md border border-slate-700/80 flex-shrink-0 group-hover:border-sky-400/50 transition-colors">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 120 120"
+              className="w-full h-full"
+              aria-label="reAIgent Logo"
+            >
+              <defs>
+                <linearGradient id="headerBgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#0F172A" />
+                  <stop offset="100%" stopColor="#0B132B" />
+                </linearGradient>
+                <linearGradient id="headerTowerGrad1" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" stopColor="#60A5FA" />
+                  <stop offset="100%" stopColor="#2563EB" />
+                </linearGradient>
+                <linearGradient id="headerTowerGrad2" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" stopColor="#38BDF8" />
+                  <stop offset="100%" stopColor="#1D4ED8" />
+                </linearGradient>
+                <linearGradient id="headerSparkGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#FFFFFF" />
+                  <stop offset="100%" stopColor="#93C5FD" />
+                </linearGradient>
+              </defs>
+
+              <rect width="120" height="120" rx="24" fill="url(#headerBgGrad)" />
+              <path d="M20 96 H100" stroke="#334155" strokeWidth="3.5" strokeLinecap="round" />
+              <path d="M26 96 V58 L44 49 V96 Z" fill="url(#headerTowerGrad2)" opacity="0.9" />
+              <path d="M49 96 V38 L69 27 V96 Z" fill="url(#headerTowerGrad1)" />
+              <path d="M74 96 V46 L92 55 V96 Z" fill="#FFFFFF" opacity="0.95" />
+              <path
+                d="M85 14 C85 23 88 26 97 26 C88 26 85 29 85 38 C85 29 82 26 73 26 C82 26 85 23 85 14 Z"
+                fill="url(#headerSparkGrad)"
+              />
+            </svg>
           </div>
-          <div>
-            <h1 className="text-xl font-bold tracking-tight leading-none">reAIgent</h1>
+          <div className="flex flex-col">
+            <h1 className="text-xl font-extrabold tracking-tight leading-none">
+              <span className="text-white">re</span>
+              <span className="text-[#38BDF8]">AI</span>
+              <span className="text-white">gent</span>
+            </h1>
+            <span className="text-[9px] font-bold uppercase tracking-[0.16em] text-slate-400 mt-1 leading-none">
+              Portfolio Intelligence
+            </span>
           </div>
         </Link>
         

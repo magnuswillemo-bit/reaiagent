@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0F172A" />
+      <stop offset="100%" stop-color="#0B132B" />
+    </linearGradient>
+    <linearGradient id="towerGrad1" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#60A5FA" />
+      <stop offset="100%" stop-color="#2563EB" />
+    </linearGradient>
+    <linearGradient id="towerGrad2" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8" />
+      <stop offset="100%" stop-color="#1D4ED8" />
+    </linearGradient>
+    <linearGradient id="sparkGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="100%" stop-color="#93C5FD" />
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded Executive Navy Squircle Background -->
+  <rect width="120" height="120" rx="26" fill="url(#bgGrad)" stroke="#1E293B" stroke-width="3" />
+
+  <!-- Subtle Architectural Grid Baseline -->
+  <path d="M22 94 H98" stroke="#334155" stroke-width="3" stroke-linecap="round" />
+
+  <!-- Left Tower (Industrial / Warehouse Footprint) -->
+  <path d="M28 94 V58 L44 50 V94 Z" fill="url(#towerGrad2)" opacity="0.85" />
+
+  <!-- Center Tower (Core Commercial Portfolio) -->
+  <path d="M50 94 V40 L68 30 V94 Z" fill="url(#towerGrad1)" />
+
+  <!-- Right Tower (High-Rise / Valuation Growth) -->
+  <path d="M74 94 V48 L90 56 V94 Z" fill="#FFFFFF" opacity="0.95" />
+
+  <!-- AI Intelligence 4-Point Star / Spark (Top Right) -->
+  <path d="M84 16 C84 25 87 28 96 28 C87 28 84 31 84 40 C84 31 81 28 72 28 C81 28 84 25 84 16 Z" fill="url(#sparkGrad)" />
+</svg>
