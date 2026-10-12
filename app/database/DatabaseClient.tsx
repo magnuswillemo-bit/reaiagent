@@ -61,8 +61,10 @@ export default function DatabaseClient() {
   const [csvPreview, setCsvPreview] = useState<any[]>([]);
   const [isUploadingCsv, setIsUploadingCsv] = useState(false);
 
+  const [aiScanFiles, setAiScanFiles] = useState<File[]>([]);
+  const aiScanInputRef = useRef<HTMLInputElement>(null);
   const [isScanning, setIsScanning] = useState(false);
-  const [scanStatusText, setScanStatusText] = useState("Uploading document to Gemini AI...");
+  const [scanStatusText, setScanStatusText] = useState("Uploading documents to Gemini AI...");
 
   const [isDivOpen, setIsDivOpen] = useState(false);
   const divDropdownRef = useRef<HTMLDivElement>(null);
@@ -191,6 +193,7 @@ export default function DatabaseClient() {
     });
     setEditingId(site.id);
     setPendingFiles([]);
+    setAiScanFiles([]);
     setSelectedUploadBucket("Lease Agreements");
     fetchSiteLogs(site.id);
     fetchSiteDocuments(site.id);
@@ -391,6 +394,7 @@ export default function DatabaseClient() {
         setMessage({ type: "success", text: "Site created successfully!" });
         setFormData(emptyForm);
         setPendingFiles([]);
+        setAiScanFiles([]);
         setTimeout(() => { fetchSites(); setView("list"); }, 1500);
       }
     }
@@ -407,52 +411,99 @@ export default function DatabaseClient() {
     return "📁";
   };
 
-  const handleDocumentScan = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // Multi-Document AI Scanner Handlers
+  const handleAiScanFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const added = Array.from(e.target.files);
+      setAiScanFiles(prev => [...prev, ...added]);
+      e.target.value = "";
+    }
+  };
+
+  const removeAiScanFile = (index: number) => {
+    setAiScanFiles(prev => prev.filter((_, idx) => idx !== index));
+  };
+
+  const handleRunMultiDocumentScan = async () => {
+    if (aiScanFiles.length === 0) return;
 
     setIsScanning(true);
-    setScanStatusText("Uploading document to Gemini AI...");
+    setScanStatusText(
+      `Analyzing ${aiScanFiles.length} document${aiScanFiles.length > 1 ? "s" : ""} with Gemini AI...`
+    );
     setMessage(null);
 
     try {
       const dataPayload = new FormData();
-      dataPayload.append("file", file);
+      aiScanFiles.forEach(file => dataPayload.append("files", file));
 
       const res = await fetch("/api/scan-lease", { method: "POST", body: dataPayload });
       const result = await res.json();
-      if (!res.ok) throw new Error(result.error || "Failed to scan document");
+      if (!res.ok) throw new Error(result.error || "Failed to scan documents");
 
       const ext = result.data;
-      const cleanContractType = (ext.contract_type || "").trim().toLowerCase() === "owned" ? "Owned" : "Rented/Leased";
+      const cleanContractType =
+        (ext.contract_type || "").trim().toLowerCase() === "owned"
+          ? "Owned"
+          : "Rented/Leased";
       
       const rawStatus = (ext.status || "Operational").trim().toLowerCase();
       let cleanStatus = "Operational";
       if (rawStatus.includes("sold") || rawStatus.includes("exit") || rawStatus.includes("close")) cleanStatus = "Exited/Sold/Closed";
       else if (rawStatus.includes("not in op")) cleanStatus = "Not in Operation";
 
+      const matchedActivity = ACTIVITIES.find(
+        a => a.toLowerCase() === (ext.activity_type || "").trim().toLowerCase()
+      ) || ext.activity_type || "";
+
       setFormData({
         site_code: ext.site_code || `AI-${Math.floor(Math.random() * 1000)}`,
         common_name: ext.common_name || "Extracted Site",
-        activity_type: ext.activity_type || "",
+        activity_type: matchedActivity,
         divisional_belonging: ext.divisional_belonging || "",
         legal_entity: ext.legal_entity || "Unknown Entity",
         status: cleanStatus,
         jv_status: ext.jv_status || "No",
-        country: ext.country || "", state: ext.state || "", city: ext.city || "", zip_code: ext.zip_code || "", street_address: ext.street_address || "",
-        latitude: ext.latitude ? String(ext.latitude) : "", longitude: ext.longitude ? String(ext.longitude) : "",
-        sqm_land: ext.sqm_land ? String(ext.sqm_land) : "", sqm_building: ext.sqm_building ? String(ext.sqm_building) : "",
-        contract_type: cleanContractType, leaseholder: ext.leaseholder || "", lease_owner: ext.lease_owner || "",
-        lease_start: ext.lease_start || "", lease_end: ext.lease_end || "", annual_cost: ext.annual_cost ? String(ext.annual_cost) : "", local_currency: ext.local_currency || "USD",
-        ai_fair_market_value: "", ai_fair_market_rent: "", ai_valuation_date: ""
+        country: ext.country || "",
+        state: ext.state || "",
+        city: ext.city || "",
+        zip_code: ext.zip_code || "",
+        street_address: ext.street_address || "",
+        latitude: ext.latitude !== null && ext.latitude !== undefined ? String(ext.latitude) : "",
+        longitude: ext.longitude !== null && ext.longitude !== undefined ? String(ext.longitude) : "",
+        sqm_land: ext.sqm_land !== null && ext.sqm_land !== undefined ? String(ext.sqm_land) : "",
+        sqm_building: ext.sqm_building !== null && ext.sqm_building !== undefined ? String(ext.sqm_building) : "",
+        contract_type: cleanContractType,
+        leaseholder: ext.leaseholder || "",
+        lease_owner: ext.lease_owner || "",
+        lease_start: ext.lease_start || "",
+        lease_end: ext.lease_end || "",
+        annual_cost: ext.annual_cost !== null && ext.annual_cost !== undefined ? String(ext.annual_cost) : "",
+        local_currency: ext.local_currency || "USD",
+        ai_fair_market_value: "",
+        ai_fair_market_rent: "",
+        ai_valuation_date: ""
       });
+
+      // Automatically queue the scanned files into the new site's Document Repository
+      const defaultCategory: ManualDocBucket =
+        cleanContractType === "Owned" ? "Other" : "Lease Agreements";
+      const queuedFromScan = aiScanFiles.map(file => ({
+        file,
+        category: defaultCategory,
+      }));
+      setPendingFiles(prev => [...prev, ...queuedFromScan]);
+      setAiScanFiles([]);
 
       setIsScanning(false);
       setActiveTab("manual");
-      setMessage({ type: "success", text: "AI extracted data successfully. Review before saving." });
+      setMessage({
+        type: "success",
+        text: `AI extracted site profile from ${queuedFromScan.length} document(s) and queued them for repository upload. Review before saving.`,
+      });
     } catch (err: any) {
       setIsScanning(false);
-      setMessage({ type: "error", text: err.message || "Error processing document with Gemini." });
+      setMessage({ type: "error", text: err.message || "Error processing documents with Gemini." });
     }
   };
 
@@ -603,7 +654,7 @@ export default function DatabaseClient() {
         {view === "list" ? (
           canEdit && (
             <button 
-              onClick={() => { setSelectedSite(null); setFormData(emptyForm); setPendingFiles([]); setSiteDocuments([]); setSelectedUploadBucket("Lease Agreements"); setActiveTab("manual"); setView("new"); setMessage(null); }} 
+              onClick={() => { setSelectedSite(null); setFormData(emptyForm); setPendingFiles([]); setAiScanFiles([]); setSiteDocuments([]); setSelectedUploadBucket("Lease Agreements"); setActiveTab("manual"); setView("new"); setMessage(null); }} 
               className="mb-4 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-all flex items-center gap-2"
             >
               <span>+</span> Create Site
@@ -1121,7 +1172,6 @@ export default function DatabaseClient() {
                         1. Select Target Bucket & Add Files
                       </h5>
                       
-                      {/* Bucket Toggle for Manual Uploads */}
                       <div className="flex bg-slate-200/70 p-1 rounded-lg border border-slate-200">
                         <button
                           type="button"
@@ -1244,29 +1294,118 @@ export default function DatabaseClient() {
               </div>
             )}
 
+            {/* Multi-Document AI Scanner View */}
             {view === "new" && activeTab === "ai" && (
-              <div className="text-center animate-in fade-in duration-300 py-4">
-                <h3 className="text-xl font-bold text-slate-900 mb-3">AI Document Intelligence</h3>
-                <p className="text-slate-500 mb-8 text-sm max-w-2xl mx-auto leading-relaxed">
-                  Upload any commercial lease agreement, property deed, or operational contract.
-                </p>
+              <div className="animate-in fade-in duration-300 py-4 max-w-4xl mx-auto">
+                <div className="text-center mb-8">
+                  <h3 className="text-xl font-bold text-slate-900 mb-2">AI Multi-Document Intelligence</h3>
+                  <p className="text-slate-500 text-sm max-w-2xl mx-auto leading-relaxed">
+                    Upload one or multiple documents (main lease agreements, addendums, amendments, property deeds, or floorplans). Gemini AI will cross-reference all files to build the site profile and queue them for your Document Repository.
+                  </p>
+                </div>
 
-                <div className="relative border-2 border-dashed border-blue-300 rounded-2xl p-16 bg-blue-50/30 hover:bg-blue-50/80 transition-colors flex flex-col items-center justify-center min-h-[300px] max-w-3xl mx-auto group">
-                  <input type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" onChange={handleDocumentScan} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" disabled={isScanning} />
-                  
-                  {!isScanning ? (
-                    <>
-                      <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center mb-5 text-blue-600 shadow-md group-hover:scale-105 transition-transform">
-                        <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1.724 1.724 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                      </div>
-                      <p className="text-lg font-bold text-blue-900 mb-2">Drag & Drop Document to Scan</p>
-                    </>
-                  ) : (
-                    <div className="z-20 relative">
-                      <div className="w-14 h-14 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-5"></div>
-                      <p className="text-base font-bold text-blue-900 mb-1">{scanStatusText}</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
+                  {/* Left: Multi-File Dropzone */}
+                  <div
+                    onClick={() => !isScanning && aiScanInputRef.current?.click()}
+                    className={`relative border-2 border-dashed border-blue-300 rounded-2xl p-10 bg-blue-50/30 hover:bg-blue-50/80 transition-colors flex flex-col items-center justify-center min-h-[260px] text-center group ${
+                      isScanning ? "opacity-60 cursor-not-allowed" : "cursor-pointer"
+                    }`}
+                  >
+                    <input
+                      ref={aiScanInputRef}
+                      type="file"
+                      multiple
+                      accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                      onChange={handleAiScanFileSelect}
+                      className="hidden"
+                      disabled={isScanning}
+                    />
+                    <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mb-4 text-blue-600 shadow-md group-hover:scale-105 transition-transform">
+                      <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1.724 1.724 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
                     </div>
-                  )}
+                    <p className="text-base font-bold text-blue-900 mb-1">Click to Add Documents</p>
+                    <p className="text-xs text-slate-500 max-w-[240px]">
+                      Select multiple PDFs, Word docs, or images at once (or add more in batches).
+                    </p>
+                  </div>
+
+                  {/* Right: Selected Files Queue & Run Button */}
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 flex flex-col justify-between min-h-[260px]">
+                    <div>
+                      <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-200">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-600">
+                          Documents Selected for AI Scan
+                        </h4>
+                        <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800">
+                          {aiScanFiles.length}
+                        </span>
+                      </div>
+
+                      {aiScanFiles.length > 0 ? (
+                        <ul className="space-y-2 max-h-44 overflow-y-auto pr-1 mb-6">
+                          {aiScanFiles.map((file, idx) => (
+                            <li
+                              key={idx}
+                              className="flex items-center justify-between bg-white border border-slate-200 px-3 py-2 rounded-lg shadow-sm"
+                            >
+                              <div className="flex items-center overflow-hidden mr-2">
+                                <span className="text-lg mr-2 flex-shrink-0">{getFileIcon(file.name)}</span>
+                                <div className="overflow-hidden">
+                                  <p className="text-xs font-semibold text-slate-800 truncate" title={file.name}>
+                                    {file.name}
+                                  </p>
+                                  <p className="text-[10px] text-slate-400">
+                                    {(file.size / 1024).toFixed(1)} KB
+                                  </p>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                disabled={isScanning}
+                                onClick={() => removeAiScanFile(idx)}
+                                className="text-slate-400 hover:text-rose-500 p-1 transition-colors disabled:opacity-40"
+                                title="Remove file"
+                              >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <div className="h-36 flex items-center justify-center border border-slate-200/70 bg-white rounded-xl mb-6">
+                          <p className="text-xs font-medium text-slate-400">
+                            No documents added yet.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleRunMultiDocumentScan}
+                      disabled={aiScanFiles.length === 0 || isScanning}
+                      className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-sm transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    >
+                      {isScanning ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                          <span>{scanStatusText}</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>✨</span>
+                          <span>
+                            Run AI Assessment ({aiScanFiles.length} {aiScanFiles.length === 1 ? "Document" : "Documents"})
+                          </span>
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
