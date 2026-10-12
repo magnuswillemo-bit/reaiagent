@@ -303,9 +303,17 @@ export default function DashboardClient() {
                 </thead>
                 <tbody className="divide-y divide-slate-50">
                   {upcomingEvents.map((event, idx) => (
-                    <tr key={idx} className="hover:bg-slate-50/80 transition-colors group">
+                    <tr
+                      key={event.id || idx}
+                      onClick={() => router.push(`/database?id=${event.id}`)}
+                      title={`Open site profile for ${event.site_code} — ${event.common_name}`}
+                      className="hover:bg-blue-50/60 cursor-pointer transition-colors group"
+                    >
                       <td className="px-6 py-4">
-                        <p className="font-bold text-blue-600 group-hover:text-blue-700">{event.site_code}</p>
+                        <p className="font-bold text-blue-600 group-hover:text-blue-700 flex items-center gap-1">
+                          <span>{event.site_code}</span>
+                          <span className="opacity-0 group-hover:opacity-100 transition-opacity text-xs">→</span>
+                        </p>
                         <p className="text-xs text-slate-500 mt-0.5 truncate max-w-[120px]">{event.common_name}</p>
                       </td>
                       <td className="px-6 py-4 font-medium text-slate-800">{event.lease_end}</td>
