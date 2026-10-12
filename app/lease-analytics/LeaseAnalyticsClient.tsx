@@ -22,9 +22,28 @@ export default function LeaseAnalyticsClient() {
   const [isSavingPdf, setIsSavingPdf] = useState(false);
   const [pdfSuccess, setPdfSuccess] = useState(false);
 
+  // Ensures Clause #1 always displays the expanded title across both new and previously saved reports
+  const getClauseDisplayTitle = (clause: any, index?: number): string => {
+    const rawTitle = String(clause?.title || "").trim();
+    const isFirstClause = Number(clause?.id) === 1 || index === 0;
+    if (
+      isFirstClause ||
+      rawTitle.toLowerCase() === "lease term & renewal options" ||
+      rawTitle.toLowerCase() === "lease term and renewal options"
+    ) {
+      return "Lease Term, Notice Period(s) & Renewal Options";
+    }
+    return rawTitle || `Clause ${(index ?? 0) + 1}`;
+  };
+
   useEffect(() => {
     const fetchSites = async () => {
-      const { data } = await supabase.from("assets").select("*").eq("status", "Operational").eq("contract_type", "Rented/Leased").order("site_code", { ascending: true });
+      const { data } = await supabase
+        .from("assets")
+        .select("*")
+        .eq("status", "Operational")
+        .eq("contract_type", "Rented/Leased")
+        .order("site_code", { ascending: true });
       if (data) setSites(data);
     };
     fetchSites();
@@ -40,10 +59,19 @@ export default function LeaseAnalyticsClient() {
     }
 
     const fetchDocsAndReports = async () => {
-      const { data: docs } = await supabase.from("site_documents").select("*").eq("site_id", selectedSiteId).order("created_at", { ascending: false });
+      const { data: docs } = await supabase
+        .from("site_documents")
+        .select("*")
+        .eq("site_id", selectedSiteId)
+        .order("created_at", { ascending: false });
       if (docs) setSiteDocuments(docs);
       
-      const { data: reports } = await supabase.from("lease_analytics").select("*").eq("site_id", selectedSiteId).order("created_at", { ascending: false }).limit(1);
+      const { data: reports } = await supabase
+        .from("lease_analytics")
+        .select("*")
+        .eq("site_id", selectedSiteId)
+        .order("created_at", { ascending: false })
+        .limit(1);
       if (reports && reports.length > 0) {
         setActiveReport(reports[0].analysis_data);
         if (reports[0].document_id) {
@@ -123,7 +151,7 @@ export default function LeaseAnalyticsClient() {
         }
       }
 
-      setLoadingStatus("AI Engine extracting 15 key clauses from all documents...");
+      setLoadingStatus("AI Engine extracting Lease Term, Notice Period(s), Renewal Options & 14 additional clauses...");
       const aiFormData = new FormData();
       finalDocUrls.forEach(url => aiFormData.append("fileUrls[]", url));
 
@@ -149,7 +177,11 @@ export default function LeaseAnalyticsClient() {
       setNewFiles([]);
       
       // Refresh document list so newly uploaded leases appear immediately
-      const { data: updatedDocs } = await supabase.from("site_documents").select("*").eq("site_id", selectedSiteId).order("created_at", { ascending: false });
+      const { data: updatedDocs } = await supabase
+        .from("site_documents")
+        .select("*")
+        .eq("site_id", selectedSiteId)
+        .order("created_at", { ascending: false });
       if (updatedDocs) setSiteDocuments(updatedDocs);
       
     } catch (err: any) {
@@ -381,7 +413,8 @@ export default function LeaseAnalyticsClient() {
       const innerColGap = 6;
       const innerColWidth = (contentWidth - 12 - innerColGap) / 2;
 
-      clauses.forEach((clause: any) => {
+      clauses.forEach((clause: any, index: number) => {
+        const displayTitle = getClauseDisplayTitle(clause, index);
         const extractedText = (clause.extracted_terms || "N/A").replace(/\\\$/g, "$");
         const riskText = (clause.risk_analysis || "N/A").replace(/\\\$/g, "$");
 
@@ -407,7 +440,7 @@ export default function LeaseAnalyticsClient() {
         doc.setFont("helvetica", "bold");
         doc.setFontSize(9.5);
         doc.setTextColor(15, 23, 42);
-        doc.text(`${clause.id}. ${clause.title}`, margin + 5, y + 6.8);
+        doc.text(`${clause.id || index + 1}. ${displayTitle}`, margin + 5, y + 6.8);
 
         const level = (clause.risk_level || "Info").toUpperCase();
         let pillBg: [number, number, number] = [241, 245, 249];
@@ -500,7 +533,11 @@ export default function LeaseAnalyticsClient() {
       setPdfSuccess(true);
 
       // Refresh document list so saved report appears immediately
-      const { data: updatedDocs } = await supabase.from("site_documents").select("*").eq("site_id", selectedSiteId).order("created_at", { ascending: false });
+      const { data: updatedDocs } = await supabase
+        .from("site_documents")
+        .select("*")
+        .eq("site_id", selectedSiteId)
+        .order("created_at", { ascending: false });
       if (updatedDocs) setSiteDocuments(updatedDocs);
     } catch (err: any) {
       console.error(err);
@@ -738,19 +775,21 @@ export default function LeaseAnalyticsClient() {
                       {activeReport.clause_analysis?.map((clause: any, index: number) => (
                         <div key={index} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
                           <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-between items-center">
-                            <h5 className="font-bold text-slate-800">{clause.id}. {clause.title}</h5>
+                            <h5 className="font-bold text-slate-800">
+                              {clause.id || index + 1}. {getClauseDisplayTitle(clause, index)}
+                            </h5>
                             {getRiskBadge(clause.risk_level)}
                           </div>
                           <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-8">
                             <div>
                               <p className="text-xs font-bold uppercase text-slate-400 tracking-wider mb-2">Extracted Terms</p>
-                              <p className="text-sm text-slate-700 leading-relaxed bg-slate-50/50 p-4 rounded-lg border border-slate-100">
+                              <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line bg-slate-50/50 p-4 rounded-lg border border-slate-100">
                                 {clause.extracted_terms}
                               </p>
                             </div>
                             <div>
                               <p className="text-xs font-bold uppercase text-slate-400 tracking-wider mb-2">AI Risk Analysis</p>
-                              <p className="text-sm text-slate-700 leading-relaxed bg-blue-50/30 p-4 rounded-lg border border-blue-100">
+                              <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line bg-blue-50/30 p-4 rounded-lg border border-blue-100">
                                 {clause.risk_analysis}
                               </p>
                             </div>
