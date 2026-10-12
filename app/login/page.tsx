@@ -1,99 +1,134 @@
 "use client";
 
-import { useState } from "react";
-import Image from "next/image";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabase";
+import { useAuth } from "../../lib/AuthContext";
 
 export default function LoginPage() {
+  const router = useRouter();
+  const { user } = useAuth();
+  
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Redirect to dashboard if they are already logged in
+  useEffect(() => {
+    if (user) {
+      router.push("/");
+    }
+  }, [user, router]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
-    setError(null);
+    setLoading(true);
+    setErrorMsg(null);
 
-    const { error: authError } = await supabase.auth.signInWithPassword({
+    const { error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
 
-    if (authError) {
-      setError("Invalid email or password. Please contact the SuperUser if you have lost your credentials.");
-      setIsLoading(false);
+    if (error) {
+      setErrorMsg(error.message);
+      setLoading(false);
+    } else {
+      router.push("/");
     }
-    // If successful, the AuthContext automatically detects the session and redirects to the Dashboard.
   };
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center bg-[#0B132B]">
-      
-      {/* Subtle Background Pattern */}
-      <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(#4f4f4f 1px, transparent 1px)', backgroundSize: '32px 32px' }}></div>
-      
-      <div className="relative z-10 w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+    <div className="min-h-screen flex items-center justify-center bg-[#0B132B] px-4">
+      <div className="max-w-md w-full bg-[#151D35] p-8 rounded-2xl shadow-xl border border-slate-800 animate-in fade-in zoom-in duration-300">
         
-        <div className="bg-slate-50 p-8 border-b border-slate-200 flex flex-col items-center text-center">
-          <div className="w-16 h-16 rounded-xl overflow-hidden shadow-sm border border-slate-300 mb-4">
-            <Image src="/reAIgent_V2.png" alt="reAIgent Logo" width={64} height={64} className="object-cover w-full h-full" priority />
-          </div>
-          <h2 className="text-2xl font-black text-slate-900 tracking-tight">reAIgent Login</h2>
-          <p className="text-sm text-slate-500 font-medium mt-1">Enterprise Real Estate Analytics</p>
-        </div>
-
-        <div className="p-8">
-          {error && (
-            <div className="mb-6 p-3 bg-rose-50 border border-rose-200 text-rose-700 text-sm font-semibold rounded-lg text-center">
-              {error}
-            </div>
-          )}
-
-          <form onSubmit={handleLogin} className="space-y-6">
-            <div>
-              <label className="block text-xs font-bold text-slate-600 mb-2 uppercase tracking-wider">Email Address</label>
-              <input 
-                type="email" 
-                required 
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent block p-3 outline-none transition-all" 
-                placeholder="Enter your registered email"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-600 mb-2 uppercase tracking-wider">Password</label>
-              <input 
-                type="password" 
-                required 
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent block p-3 outline-none transition-all" 
-                placeholder="••••••••"
-              />
-            </div>
-
-            <button 
-              type="submit" 
-              disabled={isLoading}
-              className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-md transition-all text-sm disabled:opacity-50 flex justify-center items-center gap-2"
+        {/* Brand Icon & Wordmark */}
+        <div className="flex flex-col items-center mb-8">
+          <div className="w-16 h-16 rounded-2xl overflow-hidden shadow-lg border border-slate-700/80 mb-3 bg-[#0F172A] flex items-center justify-center">
+            {/* Architectural AI Monolith Logo */}
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 120 120"
+              className="w-12 h-12"
+              aria-label="reAIgent Logo"
             >
-              {isLoading ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                  Authenticating...
-                </>
-              ) : "Access Platform"}
-            </button>
-          </form>
+              <defs>
+                <linearGradient id="loginTowerGrad1" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" stopColor="#60A5FA" />
+                  <stop offset="100%" stopColor="#2563EB" />
+                </linearGradient>
+                <linearGradient id="loginTowerGrad2" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" stopColor="#38BDF8" />
+                  <stop offset="100%" stopColor="#1D4ED8" />
+                </linearGradient>
+                <linearGradient id="loginSparkGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#FFFFFF" />
+                  <stop offset="100%" stopColor="#93C5FD" />
+                </linearGradient>
+              </defs>
+
+              <path d="M20 96 H100" stroke="#334155" strokeWidth="3.5" strokeLinecap="round" />
+              <path d="M26 96 V58 L44 49 V96 Z" fill="url(#loginTowerGrad2)" opacity="0.9" />
+              <path d="M49 96 V38 L69 27 V96 Z" fill="url(#loginTowerGrad1)" />
+              <path d="M74 96 V46 L92 55 V96 Z" fill="#FFFFFF" opacity="0.95" />
+              <path
+                d="M85 14 C85 23 88 26 97 26 C88 26 85 29 85 38 C85 29 82 26 73 26 C82 26 85 23 85 14 Z"
+                fill="url(#loginSparkGrad)"
+              />
+            </svg>
+          </div>
+          <h2 className="text-3xl font-extrabold tracking-tight text-white leading-none">
+            re<span className="text-[#38BDF8]">AI</span>gent
+          </h2>
+          <span className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400 mt-2">
+            Portfolio Intelligence
+          </span>
         </div>
 
-        <div className="bg-slate-50 p-4 border-t border-slate-200 text-center">
-          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Secure Access Controlled By Platform SuperUser</p>
-        </div>
+        {errorMsg && (
+          <div className="bg-rose-950/40 border border-rose-800 text-rose-200 text-xs px-4 py-3 rounded-lg mb-6 text-center">
+            {errorMsg}
+          </div>
+        )}
 
+        <form onSubmit={handleLogin} className="space-y-6">
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 uppercase mb-2 tracking-wide">
+              Email Address
+            </label>
+            <input
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full bg-[#0F172A] border border-slate-700/60 text-white rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+              placeholder="name@company.com"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 uppercase mb-2 tracking-wide">
+              Password
+            </label>
+            <input
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full bg-[#0F172A] border border-slate-700/60 text-white rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+              placeholder="••••••••"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold py-3.5 px-4 rounded-lg shadow-lg hover:shadow-blue-500/10 active:scale-[0.98] transition-all disabled:opacity-50 disabled:pointer-events-none"
+          >
+            {loading ? "Signing in..." : "SIGN IN"}
+          </button>
+        </form>
       </div>
     </div>
   );
