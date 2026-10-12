@@ -424,12 +424,19 @@ export default function DatabaseClient() {
     setAiScanFiles(prev => prev.filter((_, idx) => idx !== index));
   };
 
+  const toCleanNumericString = (val: any): string => {
+    if (val === null || val === undefined || val === "") return "";
+    if (typeof val === "number") return isNaN(val) ? "" : String(val);
+    const cleaned = String(val).replace(/[^0-9.-]/g, "");
+    return cleaned;
+  };
+
   const handleRunMultiDocumentScan = async () => {
     if (aiScanFiles.length === 0) return;
 
     setIsScanning(true);
     setScanStatusText(
-      `Analyzing ${aiScanFiles.length} document${aiScanFiles.length > 1 ? "s" : ""} with Gemini AI...`
+      `Deep-scanning ${aiScanFiles.length} document${aiScanFiles.length > 1 ? "s" : ""} with Gemini AI...`
     );
     setMessage(null);
 
@@ -441,7 +448,7 @@ export default function DatabaseClient() {
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || "Failed to scan documents");
 
-      const ext = result.data;
+      const ext = result.data || {};
       const cleanContractType =
         (ext.contract_type || "").trim().toLowerCase() === "owned"
           ? "Owned"
@@ -452,16 +459,24 @@ export default function DatabaseClient() {
       if (rawStatus.includes("sold") || rawStatus.includes("exit") || rawStatus.includes("close")) cleanStatus = "Exited/Sold/Closed";
       else if (rawStatus.includes("not in op")) cleanStatus = "Not in Operation";
 
-      const matchedActivity = ACTIVITIES.find(
-        a => a.toLowerCase() === (ext.activity_type || "").trim().toLowerCase()
-      ) || ext.activity_type || "";
+      // Match activity_type against ACTIVITIES list (fallback to "Office" or "Warehouse" if partial match)
+      const rawAct = (ext.activity_type || "").trim().toLowerCase();
+      let matchedActivity =
+        ACTIVITIES.find(a => a.toLowerCase() === rawAct) || "";
+      if (!matchedActivity) {
+        if (rawAct.includes("office")) matchedActivity = "Office";
+        else if (rawAct.includes("warehouse") || rawAct.includes("distribution") || rawAct.includes("logistics")) matchedActivity = "Warehouse";
+        else if (rawAct.includes("plant") || rawAct.includes("manufactur") || rawAct.includes("industrial") || rawAct.includes("factory")) matchedActivity = "Plant";
+        else if (rawAct.includes("land")) matchedActivity = "Land";
+        else if (rawAct) matchedActivity = "Other";
+      }
 
       setFormData({
         site_code: ext.site_code || `AI-${Math.floor(Math.random() * 1000)}`,
         common_name: ext.common_name || "Extracted Site",
         activity_type: matchedActivity,
         divisional_belonging: ext.divisional_belonging || "",
-        legal_entity: ext.legal_entity || "Unknown Entity",
+        legal_entity: ext.legal_entity || ext.leaseholder || "",
         status: cleanStatus,
         jv_status: ext.jv_status || "No",
         country: ext.country || "",
@@ -469,17 +484,17 @@ export default function DatabaseClient() {
         city: ext.city || "",
         zip_code: ext.zip_code || "",
         street_address: ext.street_address || "",
-        latitude: ext.latitude !== null && ext.latitude !== undefined ? String(ext.latitude) : "",
-        longitude: ext.longitude !== null && ext.longitude !== undefined ? String(ext.longitude) : "",
-        sqm_land: ext.sqm_land !== null && ext.sqm_land !== undefined ? String(ext.sqm_land) : "",
-        sqm_building: ext.sqm_building !== null && ext.sqm_building !== undefined ? String(ext.sqm_building) : "",
+        latitude: toCleanNumericString(ext.latitude),
+        longitude: toCleanNumericString(ext.longitude),
+        sqm_land: toCleanNumericString(ext.sqm_land),
+        sqm_building: toCleanNumericString(ext.sqm_building),
         contract_type: cleanContractType,
-        leaseholder: ext.leaseholder || "",
+        leaseholder: ext.leaseholder || ext.legal_entity || "",
         lease_owner: ext.lease_owner || "",
         lease_start: ext.lease_start || "",
         lease_end: ext.lease_end || "",
-        annual_cost: ext.annual_cost !== null && ext.annual_cost !== undefined ? String(ext.annual_cost) : "",
-        local_currency: ext.local_currency || "USD",
+        annual_cost: toCleanNumericString(ext.annual_cost),
+        local_currency: (ext.local_currency || "USD").toUpperCase().trim(),
         ai_fair_market_value: "",
         ai_fair_market_rent: "",
         ai_valuation_date: ""
@@ -499,7 +514,7 @@ export default function DatabaseClient() {
       setActiveTab("manual");
       setMessage({
         type: "success",
-        text: `AI extracted site profile from ${queuedFromScan.length} document(s) and queued them for repository upload. Review before saving.`,
+        text: `AI deep-scanned ${queuedFromScan.length} document(s), populated the site fields, and queued the files for repository upload. Please review and select Division(s) before saving.`,
       });
     } catch (err: any) {
       setIsScanning(false);
@@ -1300,7 +1315,7 @@ export default function DatabaseClient() {
                 <div className="text-center mb-8">
                   <h3 className="text-xl font-bold text-slate-900 mb-2">AI Multi-Document Intelligence</h3>
                   <p className="text-slate-500 text-sm max-w-2xl mx-auto leading-relaxed">
-                    Upload one or multiple documents (main lease agreements, addendums, amendments, property deeds, or floorplans). Gemini AI will cross-reference all files to build the site profile and queue them for your Document Repository.
+                    Upload one or multiple documents (main lease agreements, addendums, amendments, property deeds, or floorplans). Gemini AI will deep-scan and cross-reference all files to build the site profile and queue them for your Document Repository.
                   </p>
                 </div>
 
