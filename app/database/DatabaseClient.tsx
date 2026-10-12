@@ -426,9 +426,9 @@ export default function DatabaseClient() {
 
   const toCleanNumericString = (val: any): string => {
     if (val === null || val === undefined || val === "") return "";
-    if (typeof val === "number") return isNaN(val) ? "" : String(val);
+    if (typeof val === "number") return isNaN(val) || val === 0 ? "" : String(val);
     const cleaned = String(val).replace(/[^0-9.-]/g, "");
-    return cleaned;
+    return cleaned === "0" ? "" : cleaned;
   };
 
   const handleRunMultiDocumentScan = async () => {
@@ -448,19 +448,34 @@ export default function DatabaseClient() {
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || "Failed to scan documents");
 
-      const ext = result.data || {};
+      // Defensive unwrapping in case result.data is an array or nested object
+      let rawExt = result.data || {};
+      if (Array.isArray(rawExt)) {
+        rawExt = Object.assign({}, ...rawExt);
+      } else if (rawExt && typeof rawExt === "object" && Object.keys(rawExt).length === 1) {
+        const firstKey = Object.keys(rawExt)[0];
+        if (rawExt[firstKey] && typeof rawExt[firstKey] === "object") {
+          rawExt = rawExt[firstKey];
+        }
+      }
+
+      // Case-insensitive key lookup helper
+      const ext: Record<string, any> = {};
+      for (const [k, v] of Object.entries(rawExt || {})) {
+        ext[k.toLowerCase().trim()] = v;
+      }
+
       const cleanContractType =
-        (ext.contract_type || "").trim().toLowerCase() === "owned"
+        String(ext.contract_type || "").trim().toLowerCase() === "owned"
           ? "Owned"
           : "Rented/Leased";
       
-      const rawStatus = (ext.status || "Operational").trim().toLowerCase();
+      const rawStatus = String(ext.status || "Operational").trim().toLowerCase();
       let cleanStatus = "Operational";
       if (rawStatus.includes("sold") || rawStatus.includes("exit") || rawStatus.includes("close")) cleanStatus = "Exited/Sold/Closed";
       else if (rawStatus.includes("not in op")) cleanStatus = "Not in Operation";
 
-      // Match activity_type against ACTIVITIES list (fallback to "Office" or "Warehouse" if partial match)
-      const rawAct = (ext.activity_type || "").trim().toLowerCase();
+      const rawAct = String(ext.activity_type || "").trim().toLowerCase();
       let matchedActivity =
         ACTIVITIES.find(a => a.toLowerCase() === rawAct) || "";
       if (!matchedActivity) {
@@ -471,36 +486,37 @@ export default function DatabaseClient() {
         else if (rawAct) matchedActivity = "Other";
       }
 
-      setFormData({
-        site_code: ext.site_code || `AI-${Math.floor(Math.random() * 1000)}`,
-        common_name: ext.common_name || "Extracted Site",
+      const newFormData = {
+        site_code: String(ext.site_code || `AI-${Math.floor(Math.random() * 1000)}`),
+        common_name: String(ext.common_name || "Extracted Site"),
         activity_type: matchedActivity,
-        divisional_belonging: ext.divisional_belonging || "",
-        legal_entity: ext.legal_entity || ext.leaseholder || "",
+        divisional_belonging: String(ext.divisional_belonging || ""),
+        legal_entity: String(ext.legal_entity || ext.leaseholder || ""),
         status: cleanStatus,
-        jv_status: ext.jv_status || "No",
-        country: ext.country || "",
-        state: ext.state || "",
-        city: ext.city || "",
-        zip_code: ext.zip_code || "",
-        street_address: ext.street_address || "",
+        jv_status: String(ext.jv_status || "No"),
+        country: String(ext.country || ""),
+        state: String(ext.state || ""),
+        city: String(ext.city || ""),
+        zip_code: String(ext.zip_code || ""),
+        street_address: String(ext.street_address || ""),
         latitude: toCleanNumericString(ext.latitude),
         longitude: toCleanNumericString(ext.longitude),
         sqm_land: toCleanNumericString(ext.sqm_land),
         sqm_building: toCleanNumericString(ext.sqm_building),
         contract_type: cleanContractType,
-        leaseholder: ext.leaseholder || ext.legal_entity || "",
-        lease_owner: ext.lease_owner || "",
-        lease_start: ext.lease_start || "",
-        lease_end: ext.lease_end || "",
+        leaseholder: String(ext.leaseholder || ext.legal_entity || ""),
+        lease_owner: String(ext.lease_owner || ""),
+        lease_start: String(ext.lease_start || ""),
+        lease_end: String(ext.lease_end || ""),
         annual_cost: toCleanNumericString(ext.annual_cost),
-        local_currency: (ext.local_currency || "USD").toUpperCase().trim(),
+        local_currency: String(ext.local_currency || "USD").toUpperCase().trim(),
         ai_fair_market_value: "",
         ai_fair_market_rent: "",
         ai_valuation_date: ""
-      });
+      };
 
-      // Automatically queue the scanned files into the new site's Document Repository
+      setFormData(newFormData);
+
       const defaultCategory: ManualDocBucket =
         cleanContractType === "Owned" ? "Other" : "Lease Agreements";
       const queuedFromScan = aiScanFiles.map(file => ({
@@ -514,7 +530,7 @@ export default function DatabaseClient() {
       setActiveTab("manual");
       setMessage({
         type: "success",
-        text: `AI deep-scanned ${queuedFromScan.length} document(s), populated the site fields, and queued the files for repository upload. Please review and select Division(s) before saving.`,
+        text: `AI extracted site profile (${newFormData.common_name} — ${newFormData.city || "Review Fields"}) from ${queuedFromScan.length} document(s) and queued them for repository upload.`,
       });
     } catch (err: any) {
       setIsScanning(false);
