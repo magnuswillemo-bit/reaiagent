@@ -31,6 +31,9 @@ export default function RootLayout({
       <head>
         <title>reAIgent | Enterprise Real Estate</title>
         <meta name="description" content="Global Real Estate Portfolio & AI Analytics Dashboard" />
+        <link rel="icon" type="image/png" href="/reAIgent_V2.png" />
+        <link rel="shortcut icon" type="image/png" href="/reAIgent_V2.png" />
+        <link rel="apple-touch-icon" href="/reAIgent_V2.png" />
       </head>
       <body className="bg-slate-50 text-slate-900 min-h-screen flex flex-col antialiased selection:bg-blue-600 selection:text-white overflow-y-scroll">
         <AuthProvider>
