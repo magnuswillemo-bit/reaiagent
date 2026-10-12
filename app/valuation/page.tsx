@@ -2,8 +2,10 @@
 
 import { useState, useEffect } from "react";
 import { supabase } from "../../lib/supabase";
+import { useAuth } from "../../lib/AuthContext";
 
 export default function ValuationPage() {
+  const { user } = useAuth();
   const [sites, setSites] = useState<any[]>([]);
   const [contractFilter, setContractFilter] = useState<"Owned" | "Rented/Leased" | null>(null);
   const [selectedSiteId, setSelectedSiteId] = useState<string>("");
@@ -391,29 +393,31 @@ export default function ValuationPage() {
         });
       }
 
-      // 5. Save Locally & Upload to "Valuations" Bucket in Supabase
+      // 5. Save Locally & Upload Unique Path to "Valuations" Bucket in Supabase
       const reportType = contractFilter === "Owned" ? "FMV" : "FMR";
-      const fileName = `${dateFormatted}_${targetSite.site_code}_${reportType}_Report.pdf`;
+      const displayFileName = `${dateFormatted}_${targetSite.site_code}_${reportType}_Report.pdf`;
+      // Unique storage key prevents Storage RLS UPDATE conflicts when saving multiple reports on the same day
+      const storageFileName = `${dateFormatted}_${targetSite.site_code}_${reportType}_Report_${Date.now()}.pdf`;
 
-      doc.save(fileName);
+      doc.save(displayFileName);
 
       const pdfBlob = doc.output("blob");
 
       const { error: uploadError } = await supabase.storage
         .from("documents")
-        .upload(fileName, pdfBlob, { contentType: "application/pdf", upsert: true });
+        .upload(storageFileName, pdfBlob, { contentType: "application/pdf", upsert: false });
 
       if (uploadError) throw uploadError;
 
-      const { data: publicUrlData } = supabase.storage.from("documents").getPublicUrl(fileName);
+      const { data: publicUrlData } = supabase.storage.from("documents").getPublicUrl(storageFileName);
 
       const { error: dbError } = await supabase.from("site_documents").insert([{
-        site_id: targetSite.id,
-        file_name: fileName,
+        site_id: Number(targetSite.id),
+        file_name: displayFileName,
         file_size: pdfBlob.size,
         file_type: "Valuations",
         file_url: publicUrlData.publicUrl,
-        uploaded_by: "System"
+        uploaded_by: user?.email || "System"
       }]);
 
       if (dbError) throw dbError;
