@@ -7,6 +7,7 @@ export default function ValuationPage() {
   const [sites, setSites] = useState<any[]>([]);
   const [contractFilter, setContractFilter] = useState<"Owned" | "Rented/Leased" | null>(null);
   const [selectedSiteId, setSelectedSiteId] = useState<string>("");
+  const [siteLeaseDocs, setSiteLeaseDocs] = useState<any[]>([]);
   
   const [assessment, setAssessment] = useState<string | null>(null);
   const [estimatedValue, setEstimatedValue] = useState<number | null>(null);
@@ -35,6 +36,27 @@ export default function ValuationPage() {
     if (valData) setPastValuations(valData);
   };
 
+  // Identify whether a site document belongs to the "Lease Agreements" bucket
+  const isLeaseAgreementDoc = (doc: any): boolean => {
+    const rawType = (doc?.file_type || "").trim();
+    if (rawType === "Lease Agreements") return true;
+    if (rawType === "Valuations" || rawType === "Lease Analytics" || rawType === "Other") return false;
+
+    const name = (doc?.file_name || "").toLowerCase();
+    if (name.includes("leaseanalyticsreport") || name.includes("lease_analytics")) return false;
+    if (name.includes("_fmv_report") || name.includes("_fmr_report") || name.includes("valuation")) return false;
+    if (
+      name.includes("lease") ||
+      name.includes("contract") ||
+      name.includes("agreement") ||
+      name.includes("addendum") ||
+      name.includes("appendix")
+    ) {
+      return true;
+    }
+    return false;
+  };
+
   const filteredSites = sites.filter(site => {
     if (!contractFilter) return false;
     const type = (site.contract_type || "").trim().toLowerCase() === "owned" ? "Owned" : "Rented/Leased";
@@ -43,6 +65,7 @@ export default function ValuationPage() {
 
   useEffect(() => {
     setSelectedSiteId("");
+    setSiteLeaseDocs([]);
     setAssessment(null);
     setEstimatedValue(null);
     setConfidenceRating(null);
@@ -55,7 +78,29 @@ export default function ValuationPage() {
   useEffect(() => {
     setExportSuccess(false);
     setPdfSuccess(false);
-  }, [selectedSiteId]);
+
+    if (!selectedSiteId || contractFilter !== "Rented/Leased") {
+      setSiteLeaseDocs([]);
+      return;
+    }
+
+    const fetchLeaseAgreementsForSite = async () => {
+      const { data: docs } = await supabase
+        .from("site_documents")
+        .select("*")
+        .eq("site_id", selectedSiteId)
+        .order("created_at", { ascending: false });
+
+      if (docs) {
+        const leaseFiles = docs.filter(isLeaseAgreementDoc);
+        setSiteLeaseDocs(leaseFiles);
+      } else {
+        setSiteLeaseDocs([]);
+      }
+    };
+
+    fetchLeaseAgreementsForSite();
+  }, [selectedSiteId, contractFilter]);
 
   const stripConfidenceMeta = (text: string) => {
     return (text || "").replace(/^<!--CONFIDENCE:(.*?)-->\n?/, "");
@@ -96,7 +141,10 @@ export default function ValuationPage() {
       const res = await fetch("/api/valuation", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ site: targetSite }),
+        body: JSON.stringify({
+          site: targetSite,
+          leaseDocs: contractFilter === "Rented/Leased" ? siteLeaseDocs : [],
+        }),
       });
 
       const data = await res.json();
@@ -180,7 +228,7 @@ export default function ValuationPage() {
       doc.setTextColor(255, 255, 255);
       const reportTitle = contractFilter === "Owned"
         ? "FAIR MARKET VALUATION REPORT"
-        : "FAIR MARKET RENT ASSESSMENT";
+        : "FAIR MARKET RENT & LEASE ASSESSMENT";
       doc.text(reportTitle, margin, 15);
 
       doc.setFont("helvetica", "normal");
@@ -461,6 +509,48 @@ export default function ValuationPage() {
                 </select>
               </div>
 
+              {/* Automatic Lease Agreement Inclusion Panel for Rented/Leased Sites */}
+              {contractFilter === "Rented/Leased" && selectedSiteId && (
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+                      <span>📜</span> Repository Lease Agreements
+                    </span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                      siteLeaseDocs.length > 0
+                        ? "bg-blue-50 text-blue-700 border-blue-200"
+                        : "bg-slate-100 text-slate-500 border-slate-200"
+                    }`}>
+                      {siteLeaseDocs.length} Included
+                    </span>
+                  </div>
+
+                  {siteLeaseDocs.length > 0 ? (
+                    <>
+                      <p className="text-[11px] text-slate-500 leading-relaxed">
+                        The following lease agreement(s) will be automatically reviewed alongside regional market comparables:
+                      </p>
+                      <ul className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                        {siteLeaseDocs.map(doc => (
+                          <li
+                            key={doc.id}
+                            className="text-xs font-semibold text-slate-700 bg-white border border-slate-200/80 px-2.5 py-1.5 rounded-md truncate flex items-center gap-2"
+                            title={doc.file_name}
+                          >
+                            <span className="text-blue-600">✓</span>
+                            <span className="truncate">{doc.file_name}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : (
+                    <p className="text-[11px] text-slate-400 italic leading-relaxed">
+                      No documents found in this site&apos;s &ldquo;Lease Agreements&rdquo; bucket. Assessment will use database lease metadata and regional market data.
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div className="pt-4 border-t border-slate-100">
                 <button 
                   onClick={handleRunValuation}
@@ -502,8 +592,16 @@ export default function ValuationPage() {
               {isLoading && (
                 <div className="h-full flex flex-col items-center justify-center text-center">
                   <div className="w-12 h-12 border-4 border-blue-100 border-t-blue-600 rounded-full animate-spin mb-4"></div>
-                  <p className="text-slate-800 font-bold">Querying Macroeconomic Data...</p>
-                  <p className="text-sm text-slate-500 mt-1">Calculating regional comparables and extracting numeric values.</p>
+                  <p className="text-slate-800 font-bold">
+                    {contractFilter === "Rented/Leased" && siteLeaseDocs.length > 0
+                      ? `Analyzing Market Data & ${siteLeaseDocs.length} Lease Agreement(s)...`
+                      : "Querying Macroeconomic Data..."}
+                  </p>
+                  <p className="text-sm text-slate-500 mt-1">
+                    {contractFilter === "Rented/Leased" && siteLeaseDocs.length > 0
+                      ? "Benchmarking in-place contract terms against regional market comparables."
+                      : "Calculating regional comparables and extracting numeric values."}
+                  </p>
                 </div>
               )}
 
@@ -563,7 +661,7 @@ export default function ValuationPage() {
                   <div id="valuation-report-content" className="bg-white rounded-lg pt-2 pb-6 px-1">
                     <div className="mb-8 pb-4 border-b border-slate-200">
                       <h2 className="text-2xl font-bold text-slate-900">
-                        {contractFilter === "Owned" ? "Fair Market Valuation" : "Fair Market Rent"} Assessment
+                        {contractFilter === "Owned" ? "Fair Market Valuation" : "Fair Market Rent & Lease"} Assessment
                       </h2>
                       <p className="text-sm font-semibold text-slate-500 mt-1">
                         Site Identification: <span className="text-slate-800 mr-4">{sites.find(s => s.id.toString() === selectedSiteId)?.site_code}</span>
