@@ -22,7 +22,7 @@ export default function LeaseAnalyticsClient() {
   const [isSavingPdf, setIsSavingPdf] = useState(false);
   const [pdfSuccess, setPdfSuccess] = useState(false);
 
-  // Ensures Clause #1 always displays the expanded title across both new and previously saved reports
+  // Ensures Clause #1 always displays the expanded title
   const getClauseDisplayTitle = (clause: any, index?: number): string => {
     const rawTitle = String(clause?.title || "").trim();
     const isFirstClause = Number(clause?.id) === 1 || index === 0;
@@ -34,6 +34,27 @@ export default function LeaseAnalyticsClient() {
       return "Lease Term, Notice Period(s) & Renewal Options";
     }
     return rawTitle || `Clause ${(index ?? 0) + 1}`;
+  };
+
+  // Smart filter that handles legacy 'application/pdf' files while blocking generated reports
+  const filterLeaseDocuments = (docs: any[]) => {
+    return docs.filter(doc => {
+      const ft = String(doc.file_type || "").trim().toLowerCase();
+      const fn = String(doc.file_name || "").toLowerCase();
+
+      // 1. Block auto-generated reports by filename
+      if (fn.includes("leaseanalyticsreport") || fn.includes("valuationreport")) {
+        return false;
+      }
+
+      // 2. Block explicitly wrong buckets
+      if (ft.includes("valuation") || ft.includes("analytics") || ft === "other") {
+        return false;
+      }
+
+      // 3. Include everything else (catches 'Lease Agreements', 'application/pdf', and unassigned)
+      return true;
+    });
   };
 
   useEffect(() => {
@@ -72,12 +93,7 @@ export default function LeaseAnalyticsClient() {
       }
 
       if (docs) {
-        // ABSOLUTE STRICT FILTER: Only allow documents actively tagged as "Lease Agreements" in the DB.
-        const leaseDocs = docs.filter(doc => {
-          const ft = String(doc.file_type || "").trim().toLowerCase();
-          return ft === "lease agreements" || ft === "lease agreement";
-        });
-        setSiteDocuments(leaseDocs);
+        setSiteDocuments(filterLeaseDocuments(docs));
       } else {
         setSiteDocuments([]);
       }
@@ -194,7 +210,7 @@ export default function LeaseAnalyticsClient() {
       setActiveReport(aiData.data);
       setNewFiles([]);
       
-      // Refresh document list post-upload using the same strict filter
+      // Refresh document list post-upload
       const { data: updatedDocs } = await supabase
         .from("site_documents")
         .select("*")
@@ -202,10 +218,7 @@ export default function LeaseAnalyticsClient() {
         .order("created_at", { ascending: false });
 
       if (updatedDocs) {
-        setSiteDocuments(updatedDocs.filter(doc => {
-          const ft = String(doc.file_type || "").trim().toLowerCase();
-          return ft === "lease agreements" || ft === "lease agreement";
-        }));
+        setSiteDocuments(filterLeaseDocuments(updatedDocs));
       }
       
     } catch (err: any) {
@@ -558,10 +571,7 @@ export default function LeaseAnalyticsClient() {
         .order("created_at", { ascending: false });
 
       if (updatedDocs) {
-        setSiteDocuments(updatedDocs.filter(doc => {
-          const ft = String(doc.file_type || "").trim().toLowerCase();
-          return ft === "lease agreements" || ft === "lease agreement";
-        }));
+        setSiteDocuments(filterLeaseDocuments(updatedDocs));
       }
     } catch (err: any) {
       console.error(err);
