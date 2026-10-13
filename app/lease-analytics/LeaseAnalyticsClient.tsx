@@ -59,10 +59,12 @@ export default function LeaseAnalyticsClient() {
     }
 
     const fetchDocsAndReports = async () => {
+      // Restricted strictly to documents in the "Lease Agreements" repository bucket
       const { data: docs } = await supabase
         .from("site_documents")
         .select("*")
         .eq("site_id", selectedSiteId)
+        .eq("file_type", "Lease Agreements")
         .order("created_at", { ascending: false });
       if (docs) setSiteDocuments(docs);
       
@@ -115,7 +117,7 @@ export default function LeaseAnalyticsClient() {
       let primaryDocId = selectedDocIds.length > 0 ? selectedDocIds[0] : null;
 
       if (selectedDocIds.length > 0) {
-        setLoadingStatus("Retrieving selected documents from vault...");
+        setLoadingStatus("Retrieving selected lease agreements from vault...");
         selectedDocIds.forEach(id => {
           const doc = siteDocuments.find(d => d.id.toString() === id);
           if (doc) finalDocUrls.push(doc.file_url);
@@ -123,7 +125,7 @@ export default function LeaseAnalyticsClient() {
       }
 
       if (newFiles.length > 0) {
-        setLoadingStatus(`Uploading ${newFiles.length} new document(s) to secure vault...`);
+        setLoadingStatus(`Uploading ${newFiles.length} new lease agreement(s) to secure vault...`);
         for (const file of newFiles) {
           const fileExt = file.name.split('.').pop();
           const fileName = `${selectedSiteId}_${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
@@ -176,11 +178,12 @@ export default function LeaseAnalyticsClient() {
       setActiveReport(aiData.data);
       setNewFiles([]);
       
-      // Refresh document list so newly uploaded leases appear immediately
+      // Refresh document list so newly uploaded lease agreements appear immediately
       const { data: updatedDocs } = await supabase
         .from("site_documents")
         .select("*")
         .eq("site_id", selectedSiteId)
+        .eq("file_type", "Lease Agreements")
         .order("created_at", { ascending: false });
       if (updatedDocs) setSiteDocuments(updatedDocs);
       
@@ -537,6 +540,7 @@ export default function LeaseAnalyticsClient() {
         .from("site_documents")
         .select("*")
         .eq("site_id", selectedSiteId)
+        .eq("file_type", "Lease Agreements")
         .order("created_at", { ascending: false });
       if (updatedDocs) setSiteDocuments(updatedDocs);
     } catch (err: any) {
@@ -588,7 +592,7 @@ export default function LeaseAnalyticsClient() {
               </div>
 
               <div className={`transition-opacity duration-300 ${!selectedSiteId ? 'opacity-40 pointer-events-none' : 'opacity-100'}`}>
-                <label className="block text-xs font-semibold text-slate-500 mb-3 uppercase">2. Select Appendices & Leases</label>
+                <label className="block text-xs font-semibold text-slate-500 mb-3 uppercase">2. Select Lease Agreements</label>
                 
                 {siteDocuments.length > 0 && (
                   <div className="space-y-2 max-h-48 overflow-y-auto bg-slate-50 p-3 rounded-lg border border-slate-200 mb-4">
@@ -624,7 +628,7 @@ export default function LeaseAnalyticsClient() {
                   onClick={() => fileInputRef.current?.click()}
                 >
                   <div className="text-xl mb-1">➕</div>
-                  <p className="text-xs font-bold text-slate-700">Add Documents</p>
+                  <p className="text-xs font-bold text-slate-700">Add Lease Agreement</p>
                   <input type="file" multiple ref={fileInputRef} className="hidden" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" onChange={handleFileSelect} />
                 </div>
               </div>
@@ -660,7 +664,7 @@ export default function LeaseAnalyticsClient() {
                     <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                   </div>
                   <p className="text-slate-600 font-semibold">Ready for Analysis</p>
-                  <p className="text-sm text-slate-400 mt-1 max-w-md">Select a site and the relevant documents (main agreements and appendices) to run the extraction and negotiation strategy AI.</p>
+                  <p className="text-sm text-slate-400 mt-1 max-w-md">Select a site and the relevant lease agreement documents to run the extraction and negotiation strategy AI.</p>
                 </div>
               )}
 
