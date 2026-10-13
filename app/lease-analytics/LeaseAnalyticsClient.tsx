@@ -59,14 +59,28 @@ export default function LeaseAnalyticsClient() {
     }
 
     const fetchDocsAndReports = async () => {
-      // Restricted strictly to documents in the "Lease Agreements" repository bucket
+      // Fetch all site documents and robustly filter for Lease Agreement variations
       const { data: docs } = await supabase
         .from("site_documents")
         .select("*")
         .eq("site_id", selectedSiteId)
-        .eq("file_type", "Lease Agreements")
         .order("created_at", { ascending: false });
-      if (docs) setSiteDocuments(docs);
+
+      if (docs) {
+        const leaseDocs = docs.filter(doc => {
+          const ft = String(doc.file_type || "").toLowerCase();
+          // Exclude Valuations, Lease Analytics reports, and Other buckets
+          if (ft.includes("valuation") || ft.includes("analytics") || ft.includes("report") || ft === "other") {
+            return false;
+          }
+          // Include Lease Agreements (singular/plural), lease_agreements, or unassigned documents
+          if (ft.includes("lease") || !doc.file_type || ft === "") {
+            return true;
+          }
+          return false;
+        });
+        setSiteDocuments(leaseDocs);
+      }
       
       const { data: reports } = await supabase
         .from("lease_analytics")
@@ -183,9 +197,15 @@ export default function LeaseAnalyticsClient() {
         .from("site_documents")
         .select("*")
         .eq("site_id", selectedSiteId)
-        .eq("file_type", "Lease Agreements")
         .order("created_at", { ascending: false });
-      if (updatedDocs) setSiteDocuments(updatedDocs);
+      if (updatedDocs) {
+        setSiteDocuments(updatedDocs.filter(doc => {
+          const ft = String(doc.file_type || "").toLowerCase();
+          if (ft.includes("valuation") || ft.includes("analytics") || ft.includes("report") || ft === "other") return false;
+          if (ft.includes("lease") || !doc.file_type || ft === "") return true;
+          return false;
+        }));
+      }
       
     } catch (err: any) {
       setError(`Error: ${err.message}. Please try again.`);
@@ -540,9 +560,15 @@ export default function LeaseAnalyticsClient() {
         .from("site_documents")
         .select("*")
         .eq("site_id", selectedSiteId)
-        .eq("file_type", "Lease Agreements")
         .order("created_at", { ascending: false });
-      if (updatedDocs) setSiteDocuments(updatedDocs);
+      if (updatedDocs) {
+        setSiteDocuments(updatedDocs.filter(doc => {
+          const ft = String(doc.file_type || "").toLowerCase();
+          if (ft.includes("valuation") || ft.includes("analytics") || ft.includes("report") || ft === "other") return false;
+          if (ft.includes("lease") || !doc.file_type || ft === "") return true;
+          return false;
+        }));
+      }
     } catch (err: any) {
       console.error(err);
       setError(`Failed to save PDF: ${err.message}`);
