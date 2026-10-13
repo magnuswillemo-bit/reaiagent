@@ -61,7 +61,6 @@ export default function LeaseAnalyticsClient() {
     const fetchDocsAndReports = async () => {
       const siteNum = Number(selectedSiteId);
 
-      // Fetch all documents associated with this site ID
       const { data: docs, error: docError } = await supabase
         .from("site_documents")
         .select("*")
@@ -73,21 +72,10 @@ export default function LeaseAnalyticsClient() {
       }
 
       if (docs) {
-        // PERMISSIVE LEASE FILTER: Include all documents by default,
-        // and only exclude explicit non-lease buckets (Valuations, Lease Analytics reports, Other).
+        // ABSOLUTE STRICT FILTER: Only allow documents actively tagged as "Lease Agreements" in the DB.
         const leaseDocs = docs.filter(doc => {
           const ft = String(doc.file_type || "").trim().toLowerCase();
-          
-          if (
-            ft.includes("valuation") ||
-            ft.includes("analytics") ||
-            ft.includes("report") ||
-            ft === "other"
-          ) {
-            return false;
-          }
-
-          return true;
+          return ft === "lease agreements" || ft === "lease agreement";
         });
         setSiteDocuments(leaseDocs);
       } else {
@@ -206,7 +194,7 @@ export default function LeaseAnalyticsClient() {
       setActiveReport(aiData.data);
       setNewFiles([]);
       
-      // Refresh document list
+      // Refresh document list post-upload using the same strict filter
       const { data: updatedDocs } = await supabase
         .from("site_documents")
         .select("*")
@@ -216,8 +204,7 @@ export default function LeaseAnalyticsClient() {
       if (updatedDocs) {
         setSiteDocuments(updatedDocs.filter(doc => {
           const ft = String(doc.file_type || "").trim().toLowerCase();
-          if (ft.includes("valuation") || ft.includes("analytics") || ft.includes("report") || ft === "other") return false;
-          return true;
+          return ft === "lease agreements" || ft === "lease agreement";
         }));
       }
       
@@ -256,7 +243,6 @@ export default function LeaseAnalyticsClient() {
         }
       };
 
-      // 1. Top Corporate Header Banner
       doc.setFillColor(15, 23, 42);
       doc.rect(0, 0, pageWidth, 32, "F");
 
@@ -277,7 +263,6 @@ export default function LeaseAnalyticsClient() {
 
       y = 42;
 
-      // 2. Executive Summary Heading
       doc.setFont("helvetica", "bold");
       doc.setFontSize(13);
       doc.setTextColor(15, 23, 42);
@@ -348,7 +333,6 @@ export default function LeaseAnalyticsClient() {
         [159, 18, 57]
       );
 
-      // 3. Pre-Negotiation Playbook (2x2 Clean Grid)
       const playbook = activeReport.executive_summary?.negotiation_playbook;
       if (playbook) {
         const categories = [
@@ -435,7 +419,6 @@ export default function LeaseAnalyticsClient() {
         }
       }
 
-      // 4. 15-Point Deep Dive Section
       ensureSpace(25);
       y += 4;
       doc.setFont("helvetica", "bold");
@@ -524,7 +507,6 @@ export default function LeaseAnalyticsClient() {
         y += cardHeight + 4.5;
       });
 
-      // 5. Add Page Numbers & Footers Across All Pages
       const totalPages = doc.getNumberOfPages();
       for (let p = 1; p <= totalPages; p++) {
         doc.setPage(p);
@@ -543,7 +525,6 @@ export default function LeaseAnalyticsClient() {
         });
       }
 
-      // 6. Trigger Browser Download & Upload to "Lease Analytics" Bucket in Supabase
       const fileName = `${dateStr}_${siteCode}_LeaseAnalyticsReport.pdf`;
       doc.save(fileName);
 
@@ -570,7 +551,6 @@ export default function LeaseAnalyticsClient() {
 
       setPdfSuccess(true);
 
-      // Refresh document list
       const { data: updatedDocs } = await supabase
         .from("site_documents")
         .select("*")
@@ -580,8 +560,7 @@ export default function LeaseAnalyticsClient() {
       if (updatedDocs) {
         setSiteDocuments(updatedDocs.filter(doc => {
           const ft = String(doc.file_type || "").trim().toLowerCase();
-          if (ft.includes("valuation") || ft.includes("analytics") || ft.includes("report") || ft === "other") return false;
-          return true;
+          return ft === "lease agreements" || ft === "lease agreement";
         }));
       }
     } catch (err: any) {
@@ -612,7 +591,6 @@ export default function LeaseAnalyticsClient() {
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
         
-        {/* Left Column: Control Panel */}
         <div className="lg:col-span-1 space-y-6">
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden p-6 sticky top-8">
             <h3 className="text-sm font-bold uppercase tracking-wider text-slate-800 mb-6 border-b border-slate-100 pb-3">Document Selector</h3>
@@ -702,7 +680,6 @@ export default function LeaseAnalyticsClient() {
           </div>
         </div>
 
-        {/* Right Column: Analytics Report Output */}
         <div className="lg:col-span-3">
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 min-h-[600px] flex flex-col">
             
@@ -734,7 +711,6 @@ export default function LeaseAnalyticsClient() {
               {activeReport && !isLoading && (
                 <div id="analytics-report-content" className="space-y-10 animate-in fade-in duration-500 bg-white">
                   
-                  {/* Executive Summary & Header Section */}
                   <div className="space-y-6">
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-200 pb-2 gap-4">
                       <h4 className="text-2xl font-black text-slate-900">Executive Summary</h4>
@@ -775,7 +751,6 @@ export default function LeaseAnalyticsClient() {
                       </div>
                     </div>
 
-                    {/* Pre-Negotiation Playbook */}
                     <div className="bg-slate-800 rounded-xl p-6 text-white shadow-md">
                       <h5 className="font-bold text-sm uppercase tracking-wider mb-6 text-blue-300 flex items-center gap-2"><span>🎯</span> Pre-Negotiation Playbook</h5>
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -820,7 +795,6 @@ export default function LeaseAnalyticsClient() {
                     </div>
                   </div>
 
-                  {/* 15-Point Deep Dive Grid */}
                   <div className="space-y-6">
                     <h4 className="text-2xl font-black text-slate-900 border-b border-slate-200 pb-2 mt-12">15-Point Deep Dive</h4>
                     
