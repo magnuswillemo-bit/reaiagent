@@ -59,22 +59,24 @@ export default function LeaseAnalyticsClient() {
     }
 
     const fetchDocsAndReports = async () => {
-      // Fetch all site documents and robustly filter for Lease Agreement variations
+      const siteNum = Number(selectedSiteId);
+
+      // Fetch all documents for this site ID using correct numeric type
       const { data: docs } = await supabase
         .from("site_documents")
         .select("*")
-        .eq("site_id", selectedSiteId)
+        .eq("site_id", siteNum)
         .order("created_at", { ascending: false });
 
       if (docs) {
         const leaseDocs = docs.filter(doc => {
-          const ft = String(doc.file_type || "").toLowerCase();
-          // Exclude Valuations, Lease Analytics reports, and Other buckets
+          const ft = String(doc.file_type || "").trim().toLowerCase();
+          // Exclude Valuations, Lease Analytics reports, and Other buckets explicitly
           if (ft.includes("valuation") || ft.includes("analytics") || ft.includes("report") || ft === "other") {
             return false;
           }
-          // Include Lease Agreements (singular/plural), lease_agreements, or unassigned documents
-          if (ft.includes("lease") || !doc.file_type || ft === "") {
+          // Include Lease Agreements (singular/plural), lease_agreements, or unassigned files
+          if (ft.includes("lease") || ft === "" || !doc.file_type) {
             return true;
           }
           return false;
@@ -85,9 +87,10 @@ export default function LeaseAnalyticsClient() {
       const { data: reports } = await supabase
         .from("lease_analytics")
         .select("*")
-        .eq("site_id", selectedSiteId)
+        .eq("site_id", siteNum)
         .order("created_at", { ascending: false })
         .limit(1);
+
       if (reports && reports.length > 0) {
         setActiveReport(reports[0].analysis_data);
         if (reports[0].document_id) {
@@ -127,6 +130,7 @@ export default function LeaseAnalyticsClient() {
     setPdfSuccess(false);
 
     try {
+      const siteNum = Number(selectedSiteId);
       let finalDocUrls: string[] = [];
       let primaryDocId = selectedDocIds.length > 0 ? selectedDocIds[0] : null;
 
@@ -142,7 +146,7 @@ export default function LeaseAnalyticsClient() {
         setLoadingStatus(`Uploading ${newFiles.length} new lease agreement(s) to secure vault...`);
         for (const file of newFiles) {
           const fileExt = file.name.split('.').pop();
-          const fileName = `${selectedSiteId}_${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+          const fileName = `${siteNum}_${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
           
           const { error: uploadError } = await supabase.storage.from('documents').upload(fileName, file);
           if (uploadError) throw uploadError;
@@ -151,7 +155,7 @@ export default function LeaseAnalyticsClient() {
           finalDocUrls.push(publicUrlData.publicUrl);
 
           const { data: insertedDoc, error: dbError } = await supabase.from('site_documents').insert([{
-            site_id: Number(selectedSiteId), 
+            site_id: siteNum, 
             file_name: file.name, 
             file_size: file.size,
             file_type: "Lease Agreements", 
@@ -178,8 +182,8 @@ export default function LeaseAnalyticsClient() {
       setLoadingStatus("Saving analytics to master database...");
       
       const savePayload = {
-        site_id: Number(selectedSiteId),
-        document_id: primaryDocId, 
+        site_id: siteNum,
+        document_id: primaryDocId ? Number(primaryDocId) : null, 
         analysis_data: aiData.data
       };
 
@@ -196,13 +200,14 @@ export default function LeaseAnalyticsClient() {
       const { data: updatedDocs } = await supabase
         .from("site_documents")
         .select("*")
-        .eq("site_id", selectedSiteId)
+        .eq("site_id", siteNum)
         .order("created_at", { ascending: false });
+
       if (updatedDocs) {
         setSiteDocuments(updatedDocs.filter(doc => {
-          const ft = String(doc.file_type || "").toLowerCase();
+          const ft = String(doc.file_type || "").trim().toLowerCase();
           if (ft.includes("valuation") || ft.includes("analytics") || ft.includes("report") || ft === "other") return false;
-          if (ft.includes("lease") || !doc.file_type || ft === "") return true;
+          if (ft.includes("lease") || ft === "" || !doc.file_type) return true;
           return false;
         }));
       }
@@ -221,6 +226,7 @@ export default function LeaseAnalyticsClient() {
     setError(null);
     
     try {
+      const siteNum = Number(selectedSiteId);
       const { jsPDF } = await import("jspdf");
       const targetSite = sites.find(s => s.id.toString() === selectedSiteId);
       const siteCode = targetSite?.site_code || "Unknown";
@@ -543,7 +549,7 @@ export default function LeaseAnalyticsClient() {
       const { data: publicUrlData } = supabase.storage.from("documents").getPublicUrl(fileName);
 
       const { error: dbError } = await supabase.from("site_documents").insert([{
-        site_id: targetSite?.id || Number(selectedSiteId),
+        site_id: siteNum,
         file_name: fileName,
         file_size: pdfBlob.size,
         file_type: "Lease Analytics",
@@ -559,13 +565,14 @@ export default function LeaseAnalyticsClient() {
       const { data: updatedDocs } = await supabase
         .from("site_documents")
         .select("*")
-        .eq("site_id", selectedSiteId)
+        .eq("site_id", siteNum)
         .order("created_at", { ascending: false });
+
       if (updatedDocs) {
         setSiteDocuments(updatedDocs.filter(doc => {
-          const ft = String(doc.file_type || "").toLowerCase();
+          const ft = String(doc.file_type || "").trim().toLowerCase();
           if (ft.includes("valuation") || ft.includes("analytics") || ft.includes("report") || ft === "other") return false;
-          if (ft.includes("lease") || !doc.file_type || ft === "") return true;
+          if (ft.includes("lease") || ft === "" || !doc.file_type) return true;
           return false;
         }));
       }
@@ -633,6 +640,12 @@ export default function LeaseAnalyticsClient() {
                         <span className="text-sm text-slate-700 font-medium break-all leading-tight">{doc.file_name}</span>
                       </label>
                     ))}
+                  </div>
+                )}
+
+                {siteDocuments.length === 0 && (
+                  <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs p-3 rounded-lg mb-4">
+                    No lease agreements found in repository for this site. Upload one below or via the Database page.
                   </div>
                 )}
 
