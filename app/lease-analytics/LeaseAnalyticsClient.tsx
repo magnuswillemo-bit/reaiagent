@@ -73,9 +73,12 @@ export default function LeaseAnalyticsClient() {
       }
 
       if (docs) {
-        // Robust filter: Include all documents except explicit non-lease buckets (Valuations, Lease Analytics, Other)
+        // STRICT FILTER: Only allow documents from the "Lease Agreements" bucket/type,
+        // explicitly excluding Valuations, Lease Analytics reports, and Other buckets.
         const leaseDocs = docs.filter(doc => {
           const ft = String(doc.file_type || "").trim().toLowerCase();
+          
+          // Exclude other buckets unconditionally
           if (
             ft.includes("valuation") ||
             ft.includes("analytics") ||
@@ -84,7 +87,13 @@ export default function LeaseAnalyticsClient() {
           ) {
             return false;
           }
-          return true;
+
+          // Must explicitly match Lease Agreement(s)
+          if (ft.includes("lease")) {
+            return true;
+          }
+
+          return false;
         });
         setSiteDocuments(leaseDocs);
       } else {
@@ -214,7 +223,8 @@ export default function LeaseAnalyticsClient() {
         setSiteDocuments(updatedDocs.filter(doc => {
           const ft = String(doc.file_type || "").trim().toLowerCase();
           if (ft.includes("valuation") || ft.includes("analytics") || ft.includes("report") || ft === "other") return false;
-          return true;
+          if (ft.includes("lease")) return true;
+          return false;
         }));
       }
       
@@ -578,7 +588,8 @@ export default function LeaseAnalyticsClient() {
         setSiteDocuments(updatedDocs.filter(doc => {
           const ft = String(doc.file_type || "").trim().toLowerCase();
           if (ft.includes("valuation") || ft.includes("analytics") || ft.includes("report") || ft === "other") return false;
-          return true;
+          if (ft.includes("lease")) return true;
+          return false;
         }));
       }
     } catch (err: any) {
