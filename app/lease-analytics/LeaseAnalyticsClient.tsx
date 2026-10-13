@@ -61,27 +61,34 @@ export default function LeaseAnalyticsClient() {
     const fetchDocsAndReports = async () => {
       const siteNum = Number(selectedSiteId);
 
-      // Fetch all documents for this site ID using correct numeric type
-      const { data: docs } = await supabase
+      // Fetch all documents associated with this site ID
+      const { data: docs, error: docError } = await supabase
         .from("site_documents")
         .select("*")
         .eq("site_id", siteNum)
         .order("created_at", { ascending: false });
 
+      if (docError) {
+        console.error("Error fetching site documents:", docError);
+      }
+
       if (docs) {
+        // Robust filter: Include all documents except explicit non-lease buckets (Valuations, Lease Analytics, Other)
         const leaseDocs = docs.filter(doc => {
           const ft = String(doc.file_type || "").trim().toLowerCase();
-          // Exclude Valuations, Lease Analytics reports, and Other buckets explicitly
-          if (ft.includes("valuation") || ft.includes("analytics") || ft.includes("report") || ft === "other") {
+          if (
+            ft.includes("valuation") ||
+            ft.includes("analytics") ||
+            ft.includes("report") ||
+            ft === "other"
+          ) {
             return false;
           }
-          // Include Lease Agreements (singular/plural), lease_agreements, or unassigned files
-          if (ft.includes("lease") || ft === "" || !doc.file_type) {
-            return true;
-          }
-          return false;
+          return true;
         });
         setSiteDocuments(leaseDocs);
+      } else {
+        setSiteDocuments([]);
       }
       
       const { data: reports } = await supabase
@@ -196,7 +203,7 @@ export default function LeaseAnalyticsClient() {
       setActiveReport(aiData.data);
       setNewFiles([]);
       
-      // Refresh document list so newly uploaded lease agreements appear immediately
+      // Refresh document list
       const { data: updatedDocs } = await supabase
         .from("site_documents")
         .select("*")
@@ -207,8 +214,7 @@ export default function LeaseAnalyticsClient() {
         setSiteDocuments(updatedDocs.filter(doc => {
           const ft = String(doc.file_type || "").trim().toLowerCase();
           if (ft.includes("valuation") || ft.includes("analytics") || ft.includes("report") || ft === "other") return false;
-          if (ft.includes("lease") || ft === "" || !doc.file_type) return true;
-          return false;
+          return true;
         }));
       }
       
@@ -561,7 +567,7 @@ export default function LeaseAnalyticsClient() {
 
       setPdfSuccess(true);
 
-      // Refresh document list so saved report appears immediately
+      // Refresh document list
       const { data: updatedDocs } = await supabase
         .from("site_documents")
         .select("*")
@@ -572,8 +578,7 @@ export default function LeaseAnalyticsClient() {
         setSiteDocuments(updatedDocs.filter(doc => {
           const ft = String(doc.file_type || "").trim().toLowerCase();
           if (ft.includes("valuation") || ft.includes("analytics") || ft.includes("report") || ft === "other") return false;
-          if (ft.includes("lease") || ft === "" || !doc.file_type) return true;
-          return false;
+          return true;
         }));
       }
     } catch (err: any) {
@@ -637,7 +642,9 @@ export default function LeaseAnalyticsClient() {
                           onChange={() => toggleExistingDoc(doc.id.toString())}
                           className="mt-1 border-slate-300 text-blue-600 focus:ring-blue-500 rounded cursor-pointer" 
                         />
-                        <span className="text-sm text-slate-700 font-medium break-all leading-tight">{doc.file_name}</span>
+                        <span className="text-sm text-slate-700 font-medium break-all leading-tight">
+                          {doc.file_name} <span className="text-[10px] text-slate-400">({doc.file_type || 'Unassigned'})</span>
+                        </span>
                       </label>
                     ))}
                   </div>
