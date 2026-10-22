@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createClient } from "@supabase/supabase-js";
 
 // Initialize external clients
@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
       };
     }));
 
-    // 4. Unified AI Configuration: Forensic Audit + 15-Point Deep Dive Schema
+    // 4. Unified AI Configuration: Forensic Audit + 15-Point Deep Dive Schema using string literals
     const model = genAI.getGenerativeModel({
       model: "gemini-3.1-pro-preview",
       systemInstruction: `You are an elite commercial real estate forensic auditor and legal analyst. 
@@ -60,38 +60,38 @@ export async function POST(req: NextRequest) {
       generationConfig: {
         responseMimeType: "application/json",
         responseSchema: {
-          type: SchemaType.OBJECT,
+          type: "OBJECT",
           properties: {
             // Standard Metadata
-            landlord_name: { type: SchemaType.STRING },
-            tenant_name: { type: SchemaType.STRING },
-            commencement_date: { type: SchemaType.STRING },
-            expiration_date: { type: SchemaType.STRING },
-            annual_rent: { type: SchemaType.NUMBER },
-            currency: { type: SchemaType.STRING },
+            landlord_name: { type: "STRING" },
+            tenant_name: { type: "STRING" },
+            commencement_date: { type: "STRING" },
+            expiration_date: { type: "STRING" },
+            annual_rent: { type: "NUMBER" },
+            currency: { type: "STRING" },
             
             // Forensic Audit
-            most_recent_document_date: { type: SchemaType.STRING },
-            is_chronology_intact: { type: SchemaType.BOOLEAN },
-            is_expired_or_holdover: { type: SchemaType.BOOLEAN },
-            missing_amendments: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
-            term_inconsistencies: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
-            amendment_reference_errors: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
-            forensic_audit_summary: { type: SchemaType.STRING },
+            most_recent_document_date: { type: "STRING" },
+            is_chronology_intact: { type: "BOOLEAN" },
+            is_expired_or_holdover: { type: "BOOLEAN" },
+            missing_amendments: { type: "ARRAY", items: { type: "STRING" } },
+            term_inconsistencies: { type: "ARRAY", items: { type: "STRING" } },
+            amendment_reference_errors: { type: "ARRAY", items: { type: "STRING" } },
+            forensic_audit_summary: { type: "STRING" },
 
             // Executive Summary
             executive_summary: {
-              type: SchemaType.OBJECT,
+              type: "OBJECT",
               properties: {
-                strengths: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
-                weaknesses: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+                strengths: { type: "ARRAY", items: { type: "STRING" } },
+                weaknesses: { type: "ARRAY", items: { type: "STRING" } },
                 negotiation_playbook: {
-                  type: SchemaType.OBJECT,
+                  type: "OBJECT",
                   properties: {
-                    must_haves: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
-                    things_to_remove: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
-                    things_to_add: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
-                    things_to_consider: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } }
+                    must_haves: { type: "ARRAY", items: { type: "STRING" } },
+                    things_to_remove: { type: "ARRAY", items: { type: "STRING" } },
+                    things_to_add: { type: "ARRAY", items: { type: "STRING" } },
+                    things_to_consider: { type: "ARRAY", items: { type: "STRING" } }
                   },
                   required: ["must_haves", "things_to_remove", "things_to_add", "things_to_consider"]
                 }
@@ -101,15 +101,15 @@ export async function POST(req: NextRequest) {
 
             // 15-Point Clause Analysis
             clause_analysis: {
-              type: SchemaType.ARRAY,
+              type: "ARRAY",
               items: {
-                type: SchemaType.OBJECT,
+                type: "OBJECT",
                 properties: {
-                  id: { type: SchemaType.NUMBER },
-                  title: { type: SchemaType.STRING },
-                  extracted_terms: { type: SchemaType.STRING },
-                  risk_analysis: { type: SchemaType.STRING },
-                  risk_level: { type: SchemaType.STRING, description: "Must be 'High', 'Medium', 'Low', or 'Info'" }
+                  id: { type: "NUMBER" },
+                  title: { type: "STRING" },
+                  extracted_terms: { type: "STRING" },
+                  risk_analysis: { type: "STRING" },
+                  risk_level: { type: "STRING", description: "Must be 'High', 'Medium', 'Low', or 'Info'" }
                 },
                 required: ["id", "title", "extracted_terms", "risk_analysis", "risk_level"]
               }
