@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect } from "react";
 import { useAuth } from "../../lib/AuthContext";
 import { supabase } from "../../lib/supabase";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 export default function AiQueryPage() {
   const { user } = useAuth();
@@ -102,7 +104,7 @@ export default function AiQueryPage() {
             <>
               {messages.map((msg, idx) => (
                 <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[95%] sm:max-w-[85%] rounded-2xl p-6 ${msg.role === 'user' ? 'bg-blue-600 text-white shadow-md rounded-br-sm' : 'bg-white border border-slate-200 shadow-sm rounded-bl-sm'}`}>
+                  <div className={`max-w-[95%] sm:max-w-[85%] rounded-2xl p-6 ${msg.role === 'user' ? 'bg-blue-600 text-white shadow-md rounded-br-sm' : 'bg-white border border-slate-200 shadow-sm rounded-bl-sm overflow-x-auto'}`}>
                     
                     {msg.role === 'ai' && (
                       <div className="flex items-center gap-2 mb-4 border-b border-slate-100 pb-3">
@@ -111,9 +113,17 @@ export default function AiQueryPage() {
                       </div>
                     )}
                     
-                    <div className={msg.role === 'user' ? 'text-sm font-medium' : 'prose prose-sm prose-slate max-w-none text-sm leading-relaxed whitespace-pre-wrap'}>
-                      {msg.text}
-                    </div>
+                    {msg.role === 'user' ? (
+                      <div className="text-sm font-medium whitespace-pre-wrap">
+                        {msg.text}
+                      </div>
+                    ) : (
+                      <div className="prose prose-sm prose-slate max-w-none text-sm leading-relaxed">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {msg.text}
+                        </ReactMarkdown>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -140,7 +150,7 @@ export default function AiQueryPage() {
             <input 
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask for site counts, lease analysis, or to draw a chart..."
+              placeholder="Ask for site counts, lease analysis, or to draw a table..."
               className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent block p-3.5 pr-16 outline-none transition-all shadow-inner placeholder-slate-400"
             />
             <button 
