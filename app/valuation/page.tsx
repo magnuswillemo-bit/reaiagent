@@ -140,9 +140,16 @@ export default function ValuationPage() {
     setPdfSuccess(false);
 
     try {
+      // Extract the active session token for the secure backend route
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
       const res = await fetch("/api/valuation", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}` 
+        },
         body: JSON.stringify({
           site: targetSite,
           leaseDocs: contractFilter === "Rented/Leased" ? siteLeaseDocs : [],
@@ -523,7 +530,7 @@ export default function ValuationPage() {
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
                       siteLeaseDocs.length > 0
                         ? "bg-blue-50 text-blue-700 border-blue-200"
-                        : "bg-slate-100 text-slate-500 border-slate-200"
+                        ? "bg-slate-100 text-slate-500 border-slate-200"
                     }`}>
                       {siteLeaseDocs.length} Included
                     </span>
