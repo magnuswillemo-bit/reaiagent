@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
 
     // Lock to the stable production model
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-2.5-pro",
+      model: "gemini-3.1-pro-preview",
       generationConfig: { responseMimeType: "application/json" }
     });
 

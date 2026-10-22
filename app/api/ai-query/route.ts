@@ -29,7 +29,7 @@ RULES:
 
     // 3. Initialize Gemini with the stable production model
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-2.5-pro", 
+      model: "gemini-3.1-pro-preview", 
       systemInstruction: systemInstruction 
     });
 
