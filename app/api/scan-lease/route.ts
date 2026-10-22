@@ -37,64 +37,99 @@ export async function POST(req: NextRequest) {
       };
     }));
 
-    // 4. Unified AI Configuration & Forensic Schema
+    // 4. Unified AI Configuration: Forensic Audit + 15-Point Deep Dive Schema
     const model = genAI.getGenerativeModel({
       model: "gemini-3.1-pro-preview",
-      systemInstruction: `You are an expert commercial real estate forensic auditor. 
-      First, extract the standard commercial lease metadata (parties, rent, dates) from the provided documents.
-      Second, audit the entire stack of provided documents against each other executing these strict forensic rules:
-      1. Chronology: Identify the most recent document and base all active terms on it.
-      2. Missing Amendments: If any text references an Amendment, Addendum, or Exhibit not present in the provided files, flag it explicitly in missing_amendments.
-      3. Paragraph Cross-Referencing: Verify that any uploaded amendments correctly reference existing paragraphs or clauses in the primary lease agreement. Flag orphaned clauses in amendment_reference_errors.
-      4. Term Consistency: Calculate the lease term based on commencement and expiration dates. Flag missing lease terms, mathematical inconsistencies, or conflicting dates between documents in term_inconsistencies.
-      5. Expiration Risk: Compare the final established expiration date against the current date. Mark is_expired_or_holdover as true if the lease has lapsed without a provided extension.`,
+      systemInstruction: `You are an elite commercial real estate forensic auditor and legal analyst. 
+      Your task is to analyze the provided stack of lease documents (primary agreement plus any amendments) and return a comprehensive structured JSON response.
+
+      PHASE 1: FORENSIC INTEGRITY AUDIT
+      - Cross-reference all provided files. Identify the chronological order.
+      - Calculate the active lease term and track if the lease is currently expired/in holdover (is_expired_or_holdover).
+      - Flag missing amendments: If a document references an amendment or exhibit not present in the files, list it in missing_amendments.
+      - Flag term inconsistencies: Any conflicting dates or mathematical errors in the timeline.
+      - Flag amendment reference errors: Amendments that cite paragraphs missing from the main lease.
+      
+      PHASE 2: EXECUTIVE SUMMARY & PLAYBOOK
+      - Extract key contract strengths and weaknesses.
+      - Formulate a pre-negotiation playbook (must-haves, removals, additions, considerations).
+      
+      PHASE 3: 15-POINT CLAUSE DEEP DIVE
+      - Extract specific terms and provide risk analysis for standard commercial clauses (Term, Rent, Maintenance, Insurance, Defaults, Assignment, etc.).
+      - Assign a risk_level (High, Medium, Low, or Info) to each clause based on tenant exposure.`,
       generationConfig: {
         responseMimeType: "application/json",
         responseSchema: {
           type: SchemaType.OBJECT,
           properties: {
+            // Standard Metadata
             landlord_name: { type: SchemaType.STRING },
             tenant_name: { type: SchemaType.STRING },
             commencement_date: { type: SchemaType.STRING },
             expiration_date: { type: SchemaType.STRING },
             annual_rent: { type: SchemaType.NUMBER },
             currency: { type: SchemaType.STRING },
+            
+            // Forensic Audit
             most_recent_document_date: { type: SchemaType.STRING },
             is_chronology_intact: { type: SchemaType.BOOLEAN },
-            missing_amendments: { 
-              type: SchemaType.ARRAY, 
-              items: { type: SchemaType.STRING },
-              description: "List of any amendments, addendums, or exhibits referenced in the text but missing from the provided files."
-            },
-            term_inconsistencies: { 
-              type: SchemaType.ARRAY, 
-              items: { type: SchemaType.STRING },
-              description: "Any conflicting dates, missing defined lease terms, or timeline math errors."
-            },
-            amendment_reference_errors: { 
-              type: SchemaType.ARRAY, 
-              items: { type: SchemaType.STRING },
-              description: "List of amendments that reference paragraphs or clauses not found in the main agreement."
-            },
             is_expired_or_holdover: { type: SchemaType.BOOLEAN },
-            forensic_audit_summary: { type: SchemaType.STRING }
+            missing_amendments: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+            term_inconsistencies: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+            amendment_reference_errors: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+            forensic_audit_summary: { type: SchemaType.STRING },
+
+            // Executive Summary
+            executive_summary: {
+              type: SchemaType.OBJECT,
+              properties: {
+                strengths: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+                weaknesses: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+                negotiation_playbook: {
+                  type: SchemaType.OBJECT,
+                  properties: {
+                    must_haves: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+                    things_to_remove: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+                    things_to_add: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+                    things_to_consider: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } }
+                  },
+                  required: ["must_haves", "things_to_remove", "things_to_add", "things_to_consider"]
+                }
+              },
+              required: ["strengths", "weaknesses", "negotiation_playbook"]
+            },
+
+            // 15-Point Clause Analysis
+            clause_analysis: {
+              type: SchemaType.ARRAY,
+              items: {
+                type: SchemaType.OBJECT,
+                properties: {
+                  id: { type: SchemaType.NUMBER },
+                  title: { type: SchemaType.STRING },
+                  extracted_terms: { type: SchemaType.STRING },
+                  risk_analysis: { type: SchemaType.STRING },
+                  risk_level: { type: SchemaType.STRING, description: "Must be 'High', 'Medium', 'Low', or 'Info'" }
+                },
+                required: ["id", "title", "extracted_terms", "risk_analysis", "risk_level"]
+              }
+            }
           },
           required: [
             "landlord_name", "tenant_name", "commencement_date", "expiration_date", 
-            "annual_rent", "currency", "most_recent_document_date", "is_chronology_intact", 
-            "missing_amendments", "term_inconsistencies", "amendment_reference_errors", 
-            "is_expired_or_holdover", "forensic_audit_summary"
+            "most_recent_document_date", "is_chronology_intact", "is_expired_or_holdover",
+            "executive_summary", "clause_analysis"
           ]
         }
       }
     });
 
     // 5. Execute Batch AI Analysis
-    const promptMessage = `Analyze this set of lease documents for ${leaseDocs.length} chronological forensic consistency.`;
+    const promptMessage = `Perform the comprehensive forensic audit and 15-point deep dive on this set of ${leaseDocs.length} commercial real estate lease document(s).`;
     const result = await model.generateContent([promptMessage, ...pdfParts]);
     
     const responseText = result.response.text();
-    return NextResponse.json(JSON.parse(responseText));
+    return NextResponse.json({ data: JSON.parse(responseText) });
 
   } catch (error: any) {
     console.error("Lease Analytics Error:", error);
