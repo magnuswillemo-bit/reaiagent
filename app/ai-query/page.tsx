@@ -2,8 +2,8 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useAuth } from "../../lib/AuthContext";
+import { supabase } from "../../lib/supabase";
 
-// --- Main Chat Page Component ---
 export default function AiQueryPage() {
   const { user } = useAuth();
   const [messages, setMessages] = useState<{ role: 'user' | 'ai', text: string }[]>([]);
@@ -12,7 +12,6 @@ export default function AiQueryPage() {
   const [recentPrompts, setRecentPrompts] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Load recent prompts from local storage on initial mount
   useEffect(() => {
     const savedPrompts = localStorage.getItem('reAIgent_recent_prompts');
     if (savedPrompts) {
@@ -24,7 +23,6 @@ export default function AiQueryPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  // Only scroll to bottom when messages exist or a query is actively running
   useEffect(() => {
     if (messages.length > 0 || isLoading) {
       scrollToBottom();
@@ -38,7 +36,6 @@ export default function AiQueryPage() {
     const userMessage = input.trim();
     setInput("");
     
-    // Update local storage with the new prompt (keep last 5 unique)
     const updatedPrompts = [userMessage, ...recentPrompts.filter(p => p !== userMessage)].slice(0, 5);
     setRecentPrompts(updatedPrompts);
     localStorage.setItem('reAIgent_recent_prompts', JSON.stringify(updatedPrompts));
@@ -48,9 +45,16 @@ export default function AiQueryPage() {
     setIsLoading(true);
 
     try {
+      // Extract the active session token for the secure backend route
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
       const res = await fetch("/api/ai-query", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}` 
+        },
         body: JSON.stringify({ 
           prompt: userMessage,
           history: messages 
@@ -72,18 +76,13 @@ export default function AiQueryPage() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 h-[calc(100vh-160px)] min-h-[520px] flex flex-col">
-      
-      {/* Standardized Header */}
       <header className="flex flex-col sm:flex-row justify-between items-start sm:items-end pb-4 border-b border-slate-200 flex-shrink-0">
         <div>
           <h2 className="text-3xl font-bold text-slate-900 tracking-tight">AI Query</h2>
         </div>
       </header>
 
-      {/* Standardized Main Container */}
       <div className="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col min-h-0">
-        
-        {/* Chat History Area — No scrollbar on startup, scrolls automatically when messages arrive */}
         <div
           className={`flex-1 p-4 sm:p-8 bg-slate-50/30 ${
             hasContent ? "overflow-y-auto space-y-8" : "overflow-hidden flex items-center justify-center"
@@ -136,7 +135,6 @@ export default function AiQueryPage() {
           )}
         </div>
 
-        {/* Chat Input Area */}
         <div className="p-5 bg-white border-t border-slate-200 flex flex-col items-center flex-shrink-0">
           <form onSubmit={handleSubmit} className="flex gap-3 w-full relative">
             <input 
@@ -154,7 +152,6 @@ export default function AiQueryPage() {
             </button>
           </form>
 
-          {/* Recent Prompts Log */}
           {recentPrompts.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-2 w-full justify-start items-center">
               <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mr-1">Recent:</span>

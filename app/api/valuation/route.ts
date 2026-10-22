@@ -1,12 +1,14 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { GoogleAIFileManager } from "@google/generative-ai/server";
 import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 import os from "os";
 import fs from "fs";
 import path from "path";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 const fileManager = new GoogleAIFileManager(process.env.GEMINI_API_KEY!);
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
 
 function getMimeType(fileName: string, fallbackType?: string): string {
   const ext = (fileName.split(".").pop() || "").toLowerCase();
@@ -24,6 +26,19 @@ export async function POST(req: Request) {
   const tempFiles: string[] = [];
 
   try {
+    // 1. Extract and validate the authorization token
+    const authHeader = req.headers.get("authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return NextResponse.json({ error: "Unauthorized access" }, { status: 401 });
+    }
+    
+    const token = authHeader.split(" ")[1];
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    
+    if (authError || !user) {
+      return NextResponse.json({ error: "Invalid or expired session" }, { status: 401 });
+    }
+
     const { site, leaseDocs } = await req.json();
 
     if (!site) throw new Error("No site provided to the Valuation Engine.");
