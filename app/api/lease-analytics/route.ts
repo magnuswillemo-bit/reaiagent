@@ -41,7 +41,7 @@ export async function POST(req: Request) {
 
     // LOCK TO STABLE PRODUCTION MODEL
     const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-pro-latest",
+      model: "gemini-2.5-pro",
       generationConfig: {
         responseMimeType: "application/json",
         temperature: 0.1,
