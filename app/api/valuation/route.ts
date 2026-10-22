@@ -1,7 +1,12 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleAIFileManager } from "@google/generative-ai/server";
 import { NextResponse } from "next/server";
+import os from "os";
+import fs from "fs";
+import path from "path";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+const fileManager = new GoogleAIFileManager(process.env.GEMINI_API_KEY!);
 
 function getMimeType(fileName: string, fallbackType?: string): string {
   const ext = (fileName.split(".").pop() || "").toLowerCase();
@@ -16,38 +21,51 @@ function getMimeType(fileName: string, fallbackType?: string): string {
 }
 
 export async function POST(req: Request) {
+  const tempFiles: string[] = [];
+
   try {
     const { site, leaseDocs } = await req.json();
 
     if (!site) throw new Error("No site provided to the Valuation Engine.");
 
-    const isRented =
-      (site.contract_type || "").trim().toLowerCase() !== "owned";
+    const isRented = (site.contract_type || "").trim().toLowerCase() !== "owned";
 
-    // Force Gemini into Strict JSON Mode
+    // Locked to the stable production model and forced into Strict JSON Mode
     const model = genAI.getGenerativeModel({
-      model: "gemini-3.1-pro-preview",
+      model: "gemini-1.5-pro",
       generationConfig: { responseMimeType: "application/json" },
     });
 
     const contentParts: any[] = [];
     const attachedDocNames: string[] = [];
 
-    // Fetch and attach any Lease Agreement documents from the site's repository
+    // Fetch and route any Lease Agreement documents through the File API to bypass memory limits
     if (isRented && Array.isArray(leaseDocs) && leaseDocs.length > 0) {
       for (const doc of leaseDocs) {
         if (!doc?.file_url) continue;
         try {
           const response = await fetch(doc.file_url);
           if (!response.ok) continue;
+          
           const arrayBuffer = await response.arrayBuffer();
-          const base64Data = Buffer.from(arrayBuffer).toString("base64");
+          const buffer = Buffer.from(arrayBuffer);
           const mimeType = getMimeType(doc.file_name || "lease.pdf", doc.file_type);
 
+          const safeName = (doc.file_name || "lease.pdf").replace(/[^a-zA-Z0-9.]/g, "_");
+          const tempPath = path.join(os.tmpdir(), `val_${Date.now()}_${safeName}`);
+          
+          fs.writeFileSync(tempPath, buffer);
+          tempFiles.push(tempPath);
+
+          const uploadResult = await fileManager.uploadFile(tempPath, {
+            mimeType: mimeType,
+            displayName: doc.file_name || "Lease Agreement",
+          });
+
           contentParts.push({
-            inlineData: {
-              data: base64Data,
-              mimeType,
+            fileData: {
+              mimeType: uploadResult.file.mimeType,
+              fileUri: uploadResult.file.uri,
             },
           });
           attachedDocNames.push(doc.file_name || "Lease Agreement");
@@ -105,11 +123,26 @@ export async function POST(req: Request) {
     contentParts.push({ text: prompt });
 
     const result = await model.generateContent(contentParts);
-    const jsonResponse = JSON.parse(result.response.text());
+    
+    // Safely parse the JSON to strip out any hallucinated markdown wrappers
+    const rawText = result.response.text() || "{}";
+    const cleanedJson = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
+    const jsonResponse = JSON.parse(cleanedJson);
 
     return NextResponse.json(jsonResponse);
   } catch (error: any) {
     console.error("Valuation API Error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
+  } finally {
+    // Aggressively clean up temp files to prevent Edge storage limits
+    tempFiles.forEach(tempPath => {
+      try {
+        if (fs.existsSync(tempPath)) {
+          fs.unlinkSync(tempPath);
+        }
+      } catch (e) {
+        console.error("Failed to clean up temp file:", tempPath, e);
+      }
+    });
   }
 }

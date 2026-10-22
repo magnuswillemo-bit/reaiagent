@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleAIFileManager } from "@google/generative-ai/server";
+import os from "os";
+import fs from "fs";
+import path from "path";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+const fileManager = new GoogleAIFileManager(process.env.GEMINI_API_KEY!);
 
 function getSupportedMimeType(file: File): string {
   const ext = (file.name.split(".").pop() || "").toLowerCase();
@@ -57,6 +62,8 @@ function normalizeExtractedObject(parsed: any): Record<string, any> {
 }
 
 export async function POST(req: Request) {
+  const tempFiles: string[] = [];
+
   try {
     const formData = await req.formData();
     const multiFiles = formData.getAll("files") as File[];
@@ -69,8 +76,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "No documents uploaded" }, { status: 400 });
     }
 
+    // Lock to the stable production model
     const model = genAI.getGenerativeModel({
-      model: "gemini-3.1-pro-preview",
+      model: "gemini-1.5-pro",
       generationConfig: {
         responseMimeType: "application/json",
         temperature: 0.1,
@@ -80,16 +88,27 @@ export async function POST(req: Request) {
     const parts: any[] = [];
     const fileNames: string[] = [];
 
+    // Bypass Next.js memory limits by routing through the Google File API
     for (const file of filesToProcess) {
       const bytes = await file.arrayBuffer();
       const buffer = Buffer.from(bytes);
-      const base64Data = buffer.toString("base64");
       const mimeType = getSupportedMimeType(file);
+      
+      const safeName = file.name.replace(/[^a-zA-Z0-9.]/g, "_");
+      const tempPath = path.join(os.tmpdir(), `scan_${Date.now()}_${safeName}`);
+      
+      fs.writeFileSync(tempPath, buffer);
+      tempFiles.push(tempPath);
+
+      const uploadResult = await fileManager.uploadFile(tempPath, {
+        mimeType: mimeType,
+        displayName: file.name,
+      });
 
       parts.push({
-        inlineData: {
-          data: base64Data,
-          mimeType: mimeType,
+        fileData: {
+          mimeType: uploadResult.file.mimeType,
+          fileUri: uploadResult.file.uri,
         },
       });
       fileNames.push(file.name);
@@ -154,5 +173,16 @@ IMPORTANT CALCULATION RULES:
       { error: error.message || "Failed to process documents" },
       { status: 500 }
     );
+  } finally {
+    // Clean up local temp files immediately to free up container space
+    tempFiles.forEach(tempPath => {
+      try {
+        if (fs.existsSync(tempPath)) {
+          fs.unlinkSync(tempPath);
+        }
+      } catch (e) {
+        console.error("Failed to clean up temp file:", tempPath, e);
+      }
+    });
   }
 }

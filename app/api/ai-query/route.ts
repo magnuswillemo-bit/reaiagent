@@ -12,7 +12,7 @@ export async function POST(req: Request) {
     // 1. Fetch live database context
     const { data: assets } = await supabase.from("assets").select("*").eq("status", "Operational");
 
-    // 2. Define the strict AI Persona and Rules
+    // 2. Define the strict AI Persona and Rules (Removed Mermaid requirements)
     const systemInstruction = `You are reAIgent, an elite enterprise real estate portfolio analyst.
     
 CONTEXT:
@@ -22,14 +22,14 @@ ${JSON.stringify(assets)}
 RULES:
 1. ALWAYS base your answers strictly on the provided portfolio data.
 2. If asked for metrics, calculate them accurately from the raw data.
-3. If asked for a chart, graph, or visual distribution (like a pie chart), YOU MUST USE Mermaid.js syntax. Output the raw mermaid block enclosed in standard markdown code blocks (e.g., \`\`\`mermaid ... \`\`\`). Do NOT output ascii charts.
-4. If outputting a pie chart, limit it to the top 10 categories to keep it readable.
-5. Use markdown tables to present lists of properties or financial breakdowns.
+3. If asked to compare data, show a distribution, or visualize metrics, YOU MUST USE standard Markdown tables. Do NOT generate Mermaid.js blocks or ASCII charts.
+4. If outputting a breakdown of categories, limit it to the top 10 categories to keep it readable.
+5. Use clean markdown formatting to present financial breakdowns and highlight key insights.
 6. Be highly professional, concise, and analytical in your tone.`;
 
-    // 3. Initialize Gemini with the correct working model
+    // 3. Initialize Gemini with the stable production model
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-3.1-pro-preview", 
+      model: "gemini-1.5-pro", 
       systemInstruction: systemInstruction 
     });
 

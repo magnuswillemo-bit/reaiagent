@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleAIFileManager } from "@google/generative-ai/server";
+import os from "os";
+import fs from "fs";
+import path from "path";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+const fileManager = new GoogleAIFileManager(process.env.GEMINI_API_KEY || "");
 
 export async function POST(req: NextRequest) {
+  let tempPath = "";
+  
   try {
     const formData = await req.formData();
     const file = formData.get("file") as File;
@@ -12,13 +19,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
     }
 
-    // Convert the file to a base64 buffer for Gemini
+    // Convert the file to buffer and save to a temporary file
     const arrayBuffer = await file.arrayBuffer();
-    const base64Data = Buffer.from(arrayBuffer).toString("base64");
+    const buffer = Buffer.from(arrayBuffer);
+    
+    // Create a safe, unique temp file path
+    tempPath = path.join(os.tmpdir(), `extract_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.]/g, "_")}`);
+    fs.writeFileSync(tempPath, buffer);
 
-    // Updated to Gemini 3.1 Pro Preview with strict JSON output mode
+    // Upload to Google File API to bypass Next.js memory limits
+    const uploadResult = await fileManager.uploadFile(tempPath, {
+      mimeType: file.type || "application/pdf",
+      displayName: file.name,
+    });
+
+    // Lock to the stable production model
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-3.1-pro-preview",
+      model: "gemini-1.5-pro",
       generationConfig: { responseMimeType: "application/json" }
     });
 
@@ -57,9 +74,9 @@ export async function POST(req: NextRequest) {
     const result = await model.generateContent([
       prompt,
       {
-        inlineData: {
-          data: base64Data,
-          mimeType: file.type || "application/pdf",
+        fileData: {
+          mimeType: uploadResult.file.mimeType,
+          fileUri: uploadResult.file.uri,
         },
       },
     ]);
@@ -74,5 +91,14 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error("AI Extraction Error:", error);
     return NextResponse.json({ error: "Failed to extract data from document" }, { status: 500 });
+  } finally {
+    // Clean up the local temp file immediately to free space
+    if (tempPath && fs.existsSync(tempPath)) {
+      try {
+        fs.unlinkSync(tempPath);
+      } catch (e) {
+        console.error("Failed to clean up temp file:", tempPath, e);
+      }
+    }
   }
 }

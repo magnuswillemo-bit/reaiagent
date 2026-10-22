@@ -1,7 +1,12 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleAIFileManager } from "@google/generative-ai/server";
 import { NextResponse } from "next/server";
+import os from "os";
+import fs from "fs";
+import path from "path";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+const fileManager = new GoogleAIFileManager(process.env.GEMINI_API_KEY!);
 
 function getMimeTypeFromUrl(url: string, contentTypeHeader?: string | null): string {
   if (contentTypeHeader && contentTypeHeader.includes("/") && !contentTypeHeader.includes("octet-stream")) {
@@ -17,6 +22,8 @@ function getMimeTypeFromUrl(url: string, contentTypeHeader?: string | null): str
 }
 
 export async function POST(req: Request) {
+  const tempFiles: string[] = [];
+  
   try {
     const formData = await req.formData();
     // Support both fileUrls[] and fileUrls keys, plus direct file uploads if ever passed
@@ -32,8 +39,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "No documents provided for analysis" }, { status: 400 });
     }
 
+    // LOCK TO STABLE PRODUCTION MODEL
     const model = genAI.getGenerativeModel({
-      model: "gemini-3.1-pro-preview",
+      model: "gemini-1.5-pro",
       generationConfig: {
         responseMimeType: "application/json",
         temperature: 0.1,
@@ -43,44 +51,63 @@ export async function POST(req: Request) {
     const parts: any[] = [];
     const loadedDocNames: string[] = [];
 
-    // 1. Fetch actual binary content for each document URL so Gemini reads every page of the PDFs
+    // 1. Fetch, save to disk temporarily, and upload via Google File API to prevent Next.js memory crashes
     for (const url of uniqueFileUrls) {
       try {
         const fileRes = await fetch(url);
         if (fileRes.ok) {
           const arrayBuffer = await fileRes.arrayBuffer();
-          const base64Data = Buffer.from(arrayBuffer).toString("base64");
+          const buffer = Buffer.from(arrayBuffer);
           const mimeType = getMimeTypeFromUrl(url, fileRes.headers.get("content-type"));
+          
+          const fileName = decodeURIComponent(url.split("/").pop()?.split("?")[0] || `file_${Date.now()}.pdf`);
+          const tempPath = path.join(os.tmpdir(), fileName);
+          
+          fs.writeFileSync(tempPath, buffer);
+          tempFiles.push(tempPath);
+
+          const uploadResult = await fileManager.uploadFile(tempPath, {
+            mimeType: mimeType,
+            displayName: fileName,
+          });
 
           parts.push({
-            inlineData: {
-              data: base64Data,
-              mimeType,
+            fileData: {
+              mimeType: uploadResult.file.mimeType,
+              fileUri: uploadResult.file.uri,
             },
           });
 
-          const fileName = decodeURIComponent(url.split("/").pop()?.split("?")[0] || url);
           loadedDocNames.push(fileName);
         } else {
           loadedDocNames.push(url);
         }
       } catch (fetchErr) {
-        console.warn("Could not fetch document binary from URL, falling back to URL reference:", url, fetchErr);
+        console.warn("Could not fetch document binary from URL:", url, fetchErr);
         loadedDocNames.push(url);
       }
     }
 
-    // 2. Also support any directly uploaded File objects if present
+    // 2. Also support any directly uploaded File objects via the File API
     for (const file of directFiles) {
       if (file && typeof file.arrayBuffer === "function") {
         const arrayBuffer = await file.arrayBuffer();
-        const base64Data = Buffer.from(arrayBuffer).toString("base64");
+        const buffer = Buffer.from(arrayBuffer);
         const mimeType = getMimeTypeFromUrl(file.name, file.type);
+        
+        const tempPath = path.join(os.tmpdir(), file.name);
+        fs.writeFileSync(tempPath, buffer);
+        tempFiles.push(tempPath);
+
+        const uploadResult = await fileManager.uploadFile(tempPath, {
+          mimeType: mimeType,
+          displayName: file.name,
+        });
 
         parts.push({
-          inlineData: {
-            data: base64Data,
-            mimeType,
+          fileData: {
+            mimeType: uploadResult.file.mimeType,
+            fileUri: uploadResult.file.uri,
           },
         });
         loadedDocNames.push(file.name);
@@ -149,5 +176,16 @@ OUTPUT JSON SCHEMA (Return ONLY a single valid JSON object matching this exact s
   } catch (error: any) {
     console.error("AI Analysis Error:", error);
     return NextResponse.json({ error: error.message || "Failed to analyze lease documents" }, { status: 500 });
+  } finally {
+    // 3. Clean up the local temp files immediately to free space
+    tempFiles.forEach(tempPath => {
+      try {
+        if (fs.existsSync(tempPath)) {
+          fs.unlinkSync(tempPath);
+        }
+      } catch (e) {
+        console.error("Failed to clean up temp file:", tempPath, e);
+      }
+    });
   }
 }

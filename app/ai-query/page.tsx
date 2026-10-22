@@ -1,68 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import mermaid from "mermaid";
 import { useAuth } from "../../lib/AuthContext";
-
-// --- Custom Mermaid Chart Component ---
-const Mermaid = ({ chart }: { chart: string }) => {
-  const [svg, setSvg] = useState<string>("");
-
-  useEffect(() => {
-    mermaid.initialize({
-      startOnLoad: false,
-      theme: 'base',
-      themeVariables: {
-        fontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-        primaryTextColor: '#1e293b',
-        lineColor: '#e2e8f0',
-        pie1: '#2563eb',
-        pie2: '#38bdf8',
-        pie3: '#818cf8',
-        pie4: '#34d399',
-        pie5: '#fbbf24',
-        pie6: '#f472b6',
-        pie7: '#a78bfa',
-        pie8: '#f87171',
-        pie9: '#fb923c',
-        pie10: '#94a3b8',
-        pieStrokeColor: '#ffffff',
-        pieStrokeWidth: '3px',
-        pieOpacity: '1.0',
-        pieTitleTextSize: '18px',
-        pieTitleTextColor: '#0f172a',
-        pieSectionTextSize: '13px',
-        pieLegendTextSize: '13px',
-        pieLegendTextColor: '#334155',
-      }
-    });
-
-    const renderChart = async () => {
-      try {
-        const id = `mermaid-${Math.random().toString(36).substr(2, 9)}`;
-        const { svg: renderedSvg } = await mermaid.render(id, chart);
-        setSvg(renderedSvg);
-      } catch (error) {
-        console.error("Mermaid rendering failed:", error);
-      }
-    };
-
-    renderChart();
-  }, [chart]);
-
-  return svg ? (
-    <div 
-      className="flex justify-center my-6 p-8 bg-white border border-slate-200 rounded-xl shadow-sm overflow-x-auto"
-      dangerouslySetInnerHTML={{ __html: svg }} 
-    />
-  ) : (
-    <div className="flex justify-center my-6 p-8 bg-slate-50 border border-slate-200 rounded-xl animate-pulse">
-       <span className="text-slate-400 text-sm font-semibold">Rendering visualization...</span>
-    </div>
-  );
-};
 
 // --- Main Chat Page Component ---
 export default function AiQueryPage() {
@@ -173,43 +112,8 @@ export default function AiQueryPage() {
                       </div>
                     )}
                     
-                    <div className={msg.role === 'user' ? 'text-sm font-medium' : 'prose prose-sm prose-slate max-w-none text-sm leading-relaxed'}>
-                      {msg.role === 'user' ? (
-                        msg.text
-                      ) : (
-                        <ReactMarkdown 
-                          remarkPlugins={[remarkGfm]} 
-                          components={{
-                            code({ node, inline, className, children, ...props }: any) {
-                              const match = /language-(\w+)/.exec(className || '');
-                              const isMermaid = match && match[1] === 'mermaid';
-                              
-                              if (!inline && isMermaid) {
-                                return <Mermaid chart={String(children).replace(/\n$/, '')} />;
-                              }
-                              
-                              return !inline ? (
-                                <div className="bg-slate-800 text-slate-100 p-4 rounded-lg my-4 overflow-x-auto text-xs font-mono shadow-inner">
-                                  <code className={className} {...props}>{children}</code>
-                                </div>
-                              ) : (
-                                <code className="bg-slate-100 border border-slate-200 text-blue-700 px-1.5 py-0.5 rounded text-xs font-mono" {...props}>
-                                  {children}
-                                </code>
-                              );
-                            },
-                            table: ({node, ...props}) => <div className="overflow-x-auto my-6 border border-slate-200 rounded-xl shadow-sm"><table className="w-full text-left border-collapse text-sm bg-white" {...props} /></div>,
-                            thead: ({node, ...props}) => <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase text-[11px] font-bold tracking-wider" {...props} />,
-                            th: ({node, ...props}) => <th className="px-4 py-3" {...props} />,
-                            td: ({node, ...props}) => <td className="px-4 py-3 border-b border-slate-100 text-slate-700" {...props} />,
-                            h3: ({node, ...props}) => <h3 className="text-lg font-bold text-slate-900 mt-6 mb-3" {...props} />,
-                            p: ({node, ...props}) => <div className="mb-4 text-slate-700 leading-relaxed last:mb-0" {...props} />,
-                            ul: ({node, ...props}) => <ul className="list-disc pl-5 mb-4 text-slate-700 space-y-1" {...props} />,
-                          }}
-                        >
-                          {msg.text}
-                        </ReactMarkdown>
-                      )}
+                    <div className={msg.role === 'user' ? 'text-sm font-medium' : 'prose prose-sm prose-slate max-w-none text-sm leading-relaxed whitespace-pre-wrap'}>
+                      {msg.text}
                     </div>
                   </div>
                 </div>

@@ -3,8 +3,21 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabase";
-import { useJsApiLoader, GoogleMap, MarkerF, InfoWindowF } from "@react-google-maps/api";
-import { useSettings } from "../lib/SettingsContext"; 
+// Alias Map to GoogleMap to prevent collision with native JS Map
+import { APIProvider, Map as GoogleMap, Marker, InfoWindow, useMap } from "@vis.gl/react-google-maps";
+import { useSettings } from "../lib/SettingsContext";
+
+// Helper component to handle bounding box logic inside the modern map context
+const MapBounds = ({ sites }: { sites: any[] }) => {
+  const map = useMap();
+  useEffect(() => {
+    if (!map || sites.length === 0) return;
+    const bounds = new window.google.maps.LatLngBounds();
+    sites.forEach(site => bounds.extend({ lat: site.lat, lng: site.lng }));
+    map.fitBounds(bounds);
+  }, [map, sites]);
+  return null;
+};
 
 export default function DashboardClient() {
   const router = useRouter();
@@ -22,11 +35,6 @@ export default function DashboardClient() {
   const [mapSites, setMapSites] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedMarker, setSelectedMarker] = useState<any>(null);
-
-  const { isLoaded, loadError } = useJsApiLoader({
-    id: "google-map-script",
-    googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "",
-  });
 
   useEffect(() => {
     fetchDashboardData();
@@ -55,6 +63,7 @@ export default function DashboardClient() {
 
     const { data: valuations } = await supabase.from("valuations").select("*").order("created_at", { ascending: false });
     
+    // Native JS Map is now safely accessible
     const latestOwnedValuations = new Map();
     if (valuations) {
       valuations.forEach(val => {
@@ -154,14 +163,6 @@ export default function DashboardClient() {
     }).format(convertedValue) + " " + label;
   };
 
-  const onLoad = useCallback(function callback(map: any) {
-    if (mapSites.length > 0) {
-      const bounds = new window.google.maps.LatLngBounds();
-      mapSites.forEach(site => bounds.extend({ lat: site.lat, lng: site.lng }));
-      map.fitBounds(bounds);
-    }
-  }, [mapSites]);
-
   const KpiCard = ({ title, value, subtitle }: { title: string, value: string | number, subtitle?: string }) => {
     const stringVal = String(value);
     const textSizeClass = stringVal.length > 12 ? "text-lg xl:text-xl" : stringVal.length > 9 ? "text-xl xl:text-2xl" : "text-2xl xl:text-3xl";
@@ -221,44 +222,35 @@ export default function DashboardClient() {
             </span>
           </div>
           <div className="flex-1 w-full relative min-h-[400px]">
-            {loadError ? (
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-50 text-center p-6">
-                <div className="w-12 h-12 bg-slate-200 rounded-full flex items-center justify-center mb-3 text-slate-500">
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-                </div>
-                <p className="text-sm font-bold text-slate-700">Map visualization temporarily unavailable.</p>
-                <p className="text-xs text-slate-500 mt-1 max-w-[280px]">The Google Maps API key has reached its daily quota limit. Please review your billing setup in the Google Cloud Console.</p>
-              </div>
-            ) : isLoaded ? (
+            <APIProvider apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || ""}>
               <GoogleMap
-                mapContainerStyle={{ width: "100%", height: "100%" }}
-                center={{ lat: 20, lng: 0 }}
-                zoom={2}
-                onLoad={onLoad}
-                options={{
-                  disableDefaultUI: false,
-                  mapTypeControl: true,
-                  streetViewControl: false,
-                  styles: [
-                    { featureType: "all", elementType: "labels.text.fill", stylers: [{ color: "#525252" }] },
-                    { featureType: "water", elementType: "geometry", stylers: [{ color: "#e2e8f0" }] },
-                    { featureType: "landscape", elementType: "geometry", stylers: [{ color: "#f8fafc" }] },
-                    { featureType: "poi", stylers: [{ visibility: "off" }] }
-                  ]
-                }}
+                mapId="dashboard-map"
+                defaultZoom={2}
+                defaultCenter={{ lat: 20, lng: 0 }}
+                gestureHandling={"greedy"}
+                disableDefaultUI={false}
+                mapTypeControl={true}
+                streetViewControl={false}
+                styles={[
+                  { featureType: "all", elementType: "labels.text.fill", stylers: [{ color: "#525252" }] },
+                  { featureType: "water", elementType: "geometry", stylers: [{ color: "#e2e8f0" }] },
+                  { featureType: "landscape", elementType: "geometry", stylers: [{ color: "#f8fafc" }] },
+                  { featureType: "poi", stylers: [{ visibility: "off" }] }
+                ]}
               >
+                <MapBounds sites={mapSites} />
                 {mapSites.map((site) => (
-                  <MarkerF
+                  <Marker
                     key={site.id}
                     position={{ lat: site.lat, lng: site.lng }}
-                    onClick={() => setSelectedMarker(site)}
-                    icon="http://maps.google.com/mapfiles/ms/icons/blue-dot.png"
                     title={site.name}
+                    icon="http://maps.google.com/mapfiles/ms/icons/blue-dot.png"
+                    onClick={() => setSelectedMarker(site)}
                   />
                 ))}
 
                 {selectedMarker && (
-                  <InfoWindowF
+                  <InfoWindow
                     position={{ lat: selectedMarker.lat, lng: selectedMarker.lng }}
                     onCloseClick={() => setSelectedMarker(null)}
                   >
@@ -273,15 +265,10 @@ export default function DashboardClient() {
                         View Site →
                       </button>
                     </div>
-                  </InfoWindowF>
+                  </InfoWindow>
                 )}
               </GoogleMap>
-            ) : (
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-100 transition-colors">
-                <div className="w-8 h-8 border-3 border-slate-300 border-t-blue-600 rounded-full animate-spin mb-3"></div>
-                <p className="text-sm font-semibold text-slate-600">Loading Maps API...</p>
-              </div>
-            )}
+            </APIProvider>
           </div>
         </div>
 
