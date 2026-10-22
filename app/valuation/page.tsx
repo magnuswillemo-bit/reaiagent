@@ -530,7 +530,7 @@ export default function ValuationPage() {
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
                       siteLeaseDocs.length > 0
                         ? "bg-blue-50 text-blue-700 border-blue-200"
-                        ? "bg-slate-100 text-slate-500 border-slate-200"
+                        : "bg-slate-100 text-slate-500 border-slate-200"
                     }`}>
                       {siteLeaseDocs.length} Included
                     </span>
