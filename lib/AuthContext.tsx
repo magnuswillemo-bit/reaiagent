@@ -3,10 +3,9 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { supabase } from "./supabase";
 import { useRouter, usePathname } from "next/navigation";
-import { User } from "@supabase/supabase-js";
 
 interface AuthContextType {
-  user: User | null;
+  user: any | null;
   role: "SuperUser" | "Admin" | "User" | null;
   isLoading: boolean;
   signOut: () => Promise<void>;
@@ -15,7 +14,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<any | null>(null);
   const [role, setRole] = useState<"SuperUser" | "Admin" | "User" | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
@@ -30,7 +29,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .select("role")
         .eq("id", userId)
         .single();
-      return profile?.role || "User";
+      // Explicit cast to prevent TypeScript from throwing an 'any' type mismatch
+      return (profile?.role as "SuperUser" | "Admin" | "User") || "User";
     };
 
     const initializeAuth = async () => {
@@ -49,7 +49,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     initializeAuth();
 
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      // Explicit event filtering prevents duplicate DB queries on initial load
       if (event === "SIGNED_IN" || event === "USER_UPDATED") {
         if (session?.user) {
           const userRole = await fetchProfileRole(session.user.id);
