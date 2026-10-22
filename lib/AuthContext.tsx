@@ -3,9 +3,10 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { supabase } from "./supabase";
 import { useRouter, usePathname } from "next/navigation";
+import { User } from "@supabase/supabase-js";
 
 interface AuthContextType {
-  user: any | null;
+  user: User | null;
   role: "SuperUser" | "Admin" | "User" | null;
   isLoading: boolean;
   signOut: () => Promise<void>;
@@ -14,38 +15,59 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<any | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [role, setRole] = useState<"SuperUser" | "Admin" | "User" | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
   const pathname = usePathname();
 
   useEffect(() => {
+    let mounted = true;
+
+    const fetchProfileRole = async (userId: string) => {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", userId)
+        .single();
+      return profile?.role || "User";
+    };
+
     const initializeAuth = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       
       if (session?.user) {
-        setUser(session.user);
-        const { data: profile } = await supabase.from("profiles").select("role").eq("id", session.user.id).single();
-        setRole(profile?.role || "User");
+        const userRole = await fetchProfileRole(session.user.id);
+        if (mounted) {
+          setUser(session.user);
+          setRole(userRole);
+        }
       }
-      setIsLoading(false);
+      if (mounted) setIsLoading(false);
     };
 
     initializeAuth();
 
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user) {
-        setUser(session.user);
-        const { data: profile } = await supabase.from("profiles").select("role").eq("id", session.user.id).single();
-        setRole(profile?.role || "User");
-      } else {
-        setUser(null);
-        setRole(null);
+      // Explicit event filtering prevents duplicate DB queries on initial load
+      if (event === "SIGNED_IN" || event === "USER_UPDATED") {
+        if (session?.user) {
+          const userRole = await fetchProfileRole(session.user.id);
+          if (mounted) {
+            setUser(session.user);
+            setRole(userRole);
+          }
+        }
+      } else if (event === "SIGNED_OUT") {
+        if (mounted) {
+          setUser(null);
+          setRole(null);
+        }
       }
     });
 
     return () => {
+      mounted = false;
       authListener.subscription.unsubscribe();
     };
   }, []);
