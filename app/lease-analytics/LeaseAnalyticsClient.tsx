@@ -185,20 +185,35 @@ export default function LeaseAnalyticsClient() {
         }
       }
 
-      setLoadingStatus("AI Engine extracting Lease Term, Notice Period(s), Renewal Options & 14 additional clauses...");
-      const aiFormData = new FormData();
-      finalDocUrls.forEach(url => aiFormData.append("fileUrls[]", url));
+      setLoadingStatus(`Forensic AI Engine analyzing ${finalDocUrls.length} document(s)...`);
+      
+      // Map URLs to the JSON array format the unified backend expects
+      const payloadDocs = finalDocUrls.map(url => ({ file_url: url }));
 
-      const res = await fetch("/api/lease-analytics", { method: "POST", body: aiFormData });
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      const res = await fetch("/api/scan-lease", { 
+        method: "POST", 
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({ leaseDocs: payloadDocs }) 
+      });
+      
       const aiData = await res.json();
       if (!res.ok) throw new Error(aiData.error || "AI processing failed.");
 
       setLoadingStatus("Saving analytics to master database...");
       
+      // Safely handle both root object and wrapped { data: {...} } backend responses
+      const reportPayload = aiData.data || aiData;
+      
       const savePayload = {
         site_id: siteNum,
         document_id: primaryDocId ? Number(primaryDocId) : null, 
-        analysis_data: aiData.data
+        analysis_data: reportPayload
       };
 
       const { error: saveError } = await supabase.from("lease_analytics").insert([savePayload]);
@@ -207,7 +222,7 @@ export default function LeaseAnalyticsClient() {
          throw new Error(saveError.message || "Database rejected the payload structure.");
       }
 
-      setActiveReport(aiData.data);
+      setActiveReport(reportPayload);
       setNewFiles([]);
       
       // Refresh document list post-upload
@@ -276,15 +291,6 @@ export default function LeaseAnalyticsClient() {
 
       y = 42;
 
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(13);
-      doc.setTextColor(15, 23, 42);
-      doc.text("Executive Summary", margin, y);
-      y += 2;
-      doc.setDrawColor(226, 232, 240);
-      doc.line(margin, y, pageWidth - margin, y);
-      y += 6;
-
       const renderSummaryBlock = (
         title: string,
         items: string[],
@@ -330,195 +336,242 @@ export default function LeaseAnalyticsClient() {
         y += boxHeight + 5;
       };
 
-      renderSummaryBlock(
-        "Contract Strengths",
-        activeReport.executive_summary?.strengths || [],
-        [240, 253, 244],
-        [187, 247, 208],
-        [6, 95, 70]
-      );
-
-      renderSummaryBlock(
-        "Contract Weaknesses",
-        activeReport.executive_summary?.weaknesses || [],
-        [255, 241, 242],
-        [254, 205, 211],
-        [159, 18, 57]
-      );
-
-      const playbook = activeReport.executive_summary?.negotiation_playbook;
-      if (playbook) {
-        const categories = [
-          { label: "MUST HAVES", list: playbook.must_haves || [] },
-          { label: "THINGS TO REMOVE", list: playbook.things_to_remove || [] },
-          { label: "THINGS TO ADD", list: playbook.things_to_add || [] },
-          { label: "CONSIDERATIONS", list: playbook.things_to_consider || [] },
-        ];
-
-        ensureSpace(25);
-        y += 3;
+      // === Forensic Integrity Audit PDF Section ===
+      if (activeReport.missing_amendments || activeReport.term_inconsistencies || activeReport.forensic_audit_summary) {
         doc.setFont("helvetica", "bold");
-        doc.setFontSize(12);
+        doc.setFontSize(13);
         doc.setTextColor(15, 23, 42);
-        doc.text("Pre-Negotiation Playbook", margin, y);
+        doc.text("Forensic Integrity Audit", margin, y);
         y += 2;
         doc.setDrawColor(226, 232, 240);
         doc.line(margin, y, pageWidth - margin, y);
-        y += 5;
+        y += 6;
 
-        const colGap = 6;
-        const colWidth = (contentWidth - colGap) / 2;
-
-        for (let i = 0; i < categories.length; i += 2) {
-          const leftCat = categories[i];
-          const rightCat = categories[i + 1];
-
+        if (activeReport.forensic_audit_summary) {
+          const summaryLines = doc.splitTextToSize(activeReport.forensic_audit_summary.replace(/\\\$/g, "$"), contentWidth);
           doc.setFont("helvetica", "normal");
-          doc.setFontSize(8.5);
+          doc.setFontSize(9);
+          doc.setTextColor(51, 65, 85);
+          doc.text(summaryLines, margin, y);
+          y += summaryLines.length * 4.5 + 4;
+        }
 
-          const leftWrapped = leftCat.list.map((it: string) =>
-            doc.splitTextToSize(it.replace(/\\\$/g, "$"), colWidth - 12)
-          );
-          const rightWrapped = rightCat.list.map((it: string) =>
-            doc.splitTextToSize(it.replace(/\\\$/g, "$"), colWidth - 12)
-          );
+        if (activeReport.missing_amendments?.length > 0) {
+          renderSummaryBlock("Missing Amendments (Flagged)", activeReport.missing_amendments, [255, 241, 242], [254, 205, 211], [159, 18, 57]);
+        }
+        if (activeReport.term_inconsistencies?.length > 0) {
+          renderSummaryBlock("Term Inconsistencies", activeReport.term_inconsistencies, [255, 241, 242], [254, 205, 211], [159, 18, 57]);
+        }
+        if (activeReport.amendment_reference_errors?.length > 0) {
+          renderSummaryBlock("Reference Errors / Orphaned Clauses", activeReport.amendment_reference_errors, [255, 241, 242], [254, 205, 211], [159, 18, 57]);
+        }
+        ensureSpace(15);
+      }
 
-          const leftHeight =
-            12 +
-            leftWrapped.reduce((a: number, b: string[]) => a + b.length * 4.2 + 2, 0);
-          const rightHeight =
-            12 +
-            rightWrapped.reduce((a: number, b: string[]) => a + b.length * 4.2 + 2, 0);
-          const rowHeight = Math.max(leftHeight, rightHeight, 22);
+      // === Executive Summary PDF Section ===
+      if (activeReport.executive_summary) {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(13);
+        doc.setTextColor(15, 23, 42);
+        doc.text("Executive Summary", margin, y);
+        y += 2;
+        doc.setDrawColor(226, 232, 240);
+        doc.line(margin, y, pageWidth - margin, y);
+        y += 6;
 
-          ensureSpace(rowHeight + 4);
+        renderSummaryBlock(
+          "Contract Strengths",
+          activeReport.executive_summary.strengths || [],
+          [240, 253, 244],
+          [187, 247, 208],
+          [6, 95, 70]
+        );
 
-          doc.setFillColor(30, 41, 59);
-          doc.roundedRect(margin, y, colWidth, rowHeight, 2, 2, "F");
+        renderSummaryBlock(
+          "Contract Weaknesses",
+          activeReport.executive_summary.weaknesses || [],
+          [255, 241, 242],
+          [254, 205, 211],
+          [159, 18, 57]
+        );
+
+        const playbook = activeReport.executive_summary.negotiation_playbook;
+        if (playbook) {
+          const categories = [
+            { label: "MUST HAVES", list: playbook.must_haves || [] },
+            { label: "THINGS TO REMOVE", list: playbook.things_to_remove || [] },
+            { label: "THINGS TO ADD", list: playbook.things_to_add || [] },
+            { label: "CONSIDERATIONS", list: playbook.things_to_consider || [] },
+          ];
+
+          ensureSpace(25);
+          y += 3;
           doc.setFont("helvetica", "bold");
-          doc.setFontSize(8.5);
-          doc.setTextColor(147, 197, 253);
-          doc.text(leftCat.label, margin + 5, y + 6.5);
+          doc.setFontSize(12);
+          doc.setTextColor(15, 23, 42);
+          doc.text("Pre-Negotiation Playbook", margin, y);
+          y += 2;
+          doc.setDrawColor(226, 232, 240);
+          doc.line(margin, y, pageWidth - margin, y);
+          y += 5;
 
-          let ly = y + 12;
-          doc.setFont("helvetica", "normal");
-          doc.setFontSize(8.5);
-          doc.setTextColor(241, 245, 249);
-          leftWrapped.forEach((lines: string[]) => {
-            doc.text("•", margin + 5, ly);
-            doc.text(lines, margin + 9, ly);
-            ly += lines.length * 4.2 + 2;
-          });
+          const colGap = 6;
+          const colWidth = (contentWidth - colGap) / 2;
 
-          const rightX = margin + colWidth + colGap;
-          doc.setFillColor(30, 41, 59);
-          doc.roundedRect(rightX, y, colWidth, rowHeight, 2, 2, "F");
-          doc.setFont("helvetica", "bold");
-          doc.setFontSize(8.5);
-          doc.setTextColor(147, 197, 253);
-          doc.text(rightCat.label, rightX + 5, y + 6.5);
+          for (let i = 0; i < categories.length; i += 2) {
+            const leftCat = categories[i];
+            const rightCat = categories[i + 1];
 
-          let ry = y + 12;
-          doc.setFont("helvetica", "normal");
-          doc.setFontSize(8.5);
-          doc.setTextColor(241, 245, 249);
-          rightWrapped.forEach((lines: string[]) => {
-            doc.text("•", rightX + 5, ry);
-            doc.text(lines, rightX + 9, ry);
-            ry += lines.length * 4.2 + 2;
-          });
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(8.5);
 
-          y += rowHeight + 5;
+            const leftWrapped = leftCat.list.map((it: string) =>
+              doc.splitTextToSize(it.replace(/\\\$/g, "$"), colWidth - 12)
+            );
+            const rightWrapped = rightCat.list.map((it: string) =>
+              doc.splitTextToSize(it.replace(/\\\$/g, "$"), colWidth - 12)
+            );
+
+            const leftHeight =
+              12 +
+              leftWrapped.reduce((a: number, b: string[]) => a + b.length * 4.2 + 2, 0);
+            const rightHeight =
+              12 +
+              rightWrapped.reduce((a: number, b: string[]) => a + b.length * 4.2 + 2, 0);
+            const rowHeight = Math.max(leftHeight, rightHeight, 22);
+
+            ensureSpace(rowHeight + 4);
+
+            doc.setFillColor(30, 41, 59);
+            doc.roundedRect(margin, y, colWidth, rowHeight, 2, 2, "F");
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(8.5);
+            doc.setTextColor(147, 197, 253);
+            doc.text(leftCat.label, margin + 5, y + 6.5);
+
+            let ly = y + 12;
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(8.5);
+            doc.setTextColor(241, 245, 249);
+            leftWrapped.forEach((lines: string[]) => {
+              doc.text("•", margin + 5, ly);
+              doc.text(lines, margin + 9, ly);
+              ly += lines.length * 4.2 + 2;
+            });
+
+            const rightX = margin + colWidth + colGap;
+            doc.setFillColor(30, 41, 59);
+            doc.roundedRect(rightX, y, colWidth, rowHeight, 2, 2, "F");
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(8.5);
+            doc.setTextColor(147, 197, 253);
+            doc.text(rightCat.label, rightX + 5, y + 6.5);
+
+            let ry = y + 12;
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(8.5);
+            doc.setTextColor(241, 245, 249);
+            rightWrapped.forEach((lines: string[]) => {
+              doc.text("•", rightX + 5, ry);
+              doc.text(lines, rightX + 9, ry);
+              ry += lines.length * 4.2 + 2;
+            });
+
+            y += rowHeight + 5;
+          }
         }
       }
 
-      ensureSpace(25);
-      y += 4;
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(13);
-      doc.setTextColor(15, 23, 42);
-      doc.text("15-Point Clause Deep Dive", margin, y);
-      y += 2;
-      doc.setDrawColor(226, 232, 240);
-      doc.line(margin, y, pageWidth - margin, y);
-      y += 6;
-
-      const clauses = activeReport.clause_analysis || [];
-      const innerColGap = 6;
-      const innerColWidth = (contentWidth - 12 - innerColGap) / 2;
-
-      clauses.forEach((clause: any, index: number) => {
-        const displayTitle = getClauseDisplayTitle(clause, index);
-        const extractedText = (clause.extracted_terms || "N/A").replace(/\\\$/g, "$");
-        const riskText = (clause.risk_analysis || "N/A").replace(/\\\$/g, "$");
-
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(8.8);
-        const extractedLines = doc.splitTextToSize(extractedText, innerColWidth);
-        const riskLines = doc.splitTextToSize(riskText, innerColWidth);
-
-        const maxLines = Math.max(extractedLines.length, riskLines.length);
-        const cardHeight = 18 + maxLines * 4.3 + 6;
-
-        ensureSpace(cardHeight + 4);
-
-        doc.setFillColor(255, 255, 255);
-        doc.setDrawColor(203, 213, 225);
-        doc.roundedRect(margin, y, contentWidth, cardHeight, 2, 2, "FD");
-
-        doc.setFillColor(248, 250, 252);
-        doc.rect(margin + 0.3, y + 0.3, contentWidth - 0.6, 10, "F");
-        doc.setDrawColor(226, 232, 240);
-        doc.line(margin, y + 10.3, pageWidth - margin, y + 10.3);
-
+      // === 15-Point Deep Dive PDF Section ===
+      if (activeReport.clause_analysis && activeReport.clause_analysis.length > 0) {
+        ensureSpace(25);
+        y += 4;
         doc.setFont("helvetica", "bold");
-        doc.setFontSize(9.5);
+        doc.setFontSize(13);
         doc.setTextColor(15, 23, 42);
-        doc.text(`${clause.id || index + 1}. ${displayTitle}`, margin + 5, y + 6.8);
+        doc.text("15-Point Clause Deep Dive", margin, y);
+        y += 2;
+        doc.setDrawColor(226, 232, 240);
+        doc.line(margin, y, pageWidth - margin, y);
+        y += 6;
 
-        const level = (clause.risk_level || "Info").toUpperCase();
-        let pillBg: [number, number, number] = [241, 245, 249];
-        let pillFg: [number, number, number] = [71, 85, 105];
-        if (level.includes("HIGH")) {
-          pillBg = [254, 226, 226];
-          pillFg = [153, 27, 27];
-        } else if (level.includes("MEDIUM")) {
-          pillBg = [254, 243, 199];
-          pillFg = [146, 64, 14];
-        } else if (level.includes("LOW")) {
-          pillBg = [209, 250, 229];
-          pillFg = [6, 95, 70];
-        }
+        const clauses = activeReport.clause_analysis || [];
+        const innerColGap = 6;
+        const innerColWidth = (contentWidth - 12 - innerColGap) / 2;
 
-        const badgeW = 26;
-        doc.setFillColor(...pillBg);
-        doc.roundedRect(pageWidth - margin - badgeW - 4, y + 2.2, badgeW, 6, 1.5, 1.5, "F");
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(7);
-        doc.setTextColor(...pillFg);
-        doc.text(`${level} RISK`, pageWidth - margin - 4 - badgeW / 2, y + 6.2, {
-          align: "center",
+        clauses.forEach((clause: any, index: number) => {
+          const displayTitle = getClauseDisplayTitle(clause, index);
+          const extractedText = (clause.extracted_terms || "N/A").replace(/\\\$/g, "$");
+          const riskText = (clause.risk_analysis || "N/A").replace(/\\\$/g, "$");
+
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(8.8);
+          const extractedLines = doc.splitTextToSize(extractedText, innerColWidth);
+          const riskLines = doc.splitTextToSize(riskText, innerColWidth);
+
+          const maxLines = Math.max(extractedLines.length, riskLines.length);
+          const cardHeight = 18 + maxLines * 4.3 + 6;
+
+          ensureSpace(cardHeight + 4);
+
+          doc.setFillColor(255, 255, 255);
+          doc.setDrawColor(203, 213, 225);
+          doc.roundedRect(margin, y, contentWidth, cardHeight, 2, 2, "FD");
+
+          doc.setFillColor(248, 250, 252);
+          doc.rect(margin + 0.3, y + 0.3, contentWidth - 0.6, 10, "F");
+          doc.setDrawColor(226, 232, 240);
+          doc.line(margin, y + 10.3, pageWidth - margin, y + 10.3);
+
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(9.5);
+          doc.setTextColor(15, 23, 42);
+          doc.text(`${clause.id || index + 1}. ${displayTitle}`, margin + 5, y + 6.8);
+
+          const level = (clause.risk_level || "Info").toUpperCase();
+          let pillBg: [number, number, number] = [241, 245, 249];
+          let pillFg: [number, number, number] = [71, 85, 105];
+          if (level.includes("HIGH")) {
+            pillBg = [254, 226, 226];
+            pillFg = [153, 27, 27];
+          } else if (level.includes("MEDIUM")) {
+            pillBg = [254, 243, 199];
+            pillFg = [146, 64, 14];
+          } else if (level.includes("LOW")) {
+            pillBg = [209, 250, 229];
+            pillFg = [6, 95, 70];
+          }
+
+          const badgeW = 26;
+          doc.setFillColor(...pillBg);
+          doc.roundedRect(pageWidth - margin - badgeW - 4, y + 2.2, badgeW, 6, 1.5, 1.5, "F");
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(7);
+          doc.setTextColor(...pillFg);
+          doc.text(`${level} RISK`, pageWidth - margin - 4 - badgeW / 2, y + 6.2, {
+            align: "center",
+          });
+
+          const leftColX = margin + 5;
+          const rightColX = margin + 5 + innerColWidth + innerColGap;
+          const subHeaderY = y + 15.5;
+          const bodyStartY = y + 20.5;
+
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(7.5);
+          doc.setTextColor(100, 116, 139);
+          doc.text("EXTRACTED TERMS", leftColX, subHeaderY);
+          doc.text("AI RISK ANALYSIS", rightColX, subHeaderY);
+
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(8.8);
+          doc.setTextColor(51, 65, 85);
+          doc.text(extractedLines, leftColX, bodyStartY);
+          doc.text(riskLines, rightColX, bodyStartY);
+
+          y += cardHeight + 4.5;
         });
-
-        const leftColX = margin + 5;
-        const rightColX = margin + 5 + innerColWidth + innerColGap;
-        const subHeaderY = y + 15.5;
-        const bodyStartY = y + 20.5;
-
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(7.5);
-        doc.setTextColor(100, 116, 139);
-        doc.text("EXTRACTED TERMS", leftColX, subHeaderY);
-        doc.text("AI RISK ANALYSIS", rightColX, subHeaderY);
-
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(8.8);
-        doc.setTextColor(51, 65, 85);
-        doc.text(extractedLines, leftColX, bodyStartY);
-        doc.text(riskLines, rightColX, bodyStartY);
-
-        y += cardHeight + 4.5;
-      });
+      }
 
       const totalPages = doc.getNumberOfPages();
       for (let p = 1; p <= totalPages; p++) {
@@ -700,7 +753,7 @@ export default function LeaseAnalyticsClient() {
                     <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                   </div>
                   <p className="text-slate-600 font-semibold">Ready for Analysis</p>
-                  <p className="text-sm text-slate-400 mt-1 max-w-md">Select a site and the relevant lease agreement documents to run the extraction and negotiation strategy AI.</p>
+                  <p className="text-sm text-slate-400 mt-1 max-w-md">Select a site and the relevant lease agreement documents to run the extraction, forensic audit, and negotiation strategy AI.</p>
                 </div>
               )}
 
@@ -721,120 +774,233 @@ export default function LeaseAnalyticsClient() {
               {activeReport && !isLoading && (
                 <div id="analytics-report-content" className="space-y-10 animate-in fade-in duration-500 bg-white">
                   
-                  <div className="space-y-6">
-                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-200 pb-2 gap-4">
-                      <h4 className="text-2xl font-black text-slate-900">Executive Summary</h4>
-                      <button 
-                        onClick={handleSavePdf}
-                        disabled={isSavingPdf || pdfSuccess}
-                        className={`px-4 py-2 text-sm font-bold rounded-lg shadow-sm transition-all flex items-center gap-2 ${
-                          pdfSuccess ? "bg-slate-800 text-white" : "bg-white text-slate-700 border border-slate-300 hover:bg-slate-100"
-                        }`}
-                      >
-                        {pdfSuccess ? (
-                          <><span>✓</span> Saved</>
-                        ) : isSavingPdf ? (
-                          <><div className="w-3 h-3 border-2 border-slate-700/30 border-t-slate-700 rounded-full animate-spin"></div> Saving...</>
-                        ) : (
-                          <><span>📄</span> Save Report (PDF)</>
-                        )}
-                      </button>
-                    </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="bg-emerald-50/50 border border-emerald-100 rounded-xl p-6">
-                        <h5 className="text-emerald-800 font-bold text-sm uppercase tracking-wider mb-4 flex items-center gap-2"><span>✓</span> Contract Strengths</h5>
-                        <ul className="space-y-2">
-                          {activeReport.executive_summary?.strengths?.map((item: string, i: number) => (
-                            <li key={i} className="text-sm text-emerald-900 leading-relaxed">{item}</li>
-                          ))}
-                        </ul>
-                      </div>
+                  <div className="flex flex-col sm:flex-row justify-end items-start sm:items-center border-b border-slate-200 pb-4 gap-4">
+                    <button 
+                      onClick={handleSavePdf}
+                      disabled={isSavingPdf || pdfSuccess}
+                      className={`px-4 py-2 text-sm font-bold rounded-lg shadow-sm transition-all flex items-center gap-2 ${
+                        pdfSuccess ? "bg-slate-800 text-white" : "bg-white text-slate-700 border border-slate-300 hover:bg-slate-100"
+                      }`}
+                    >
+                      {pdfSuccess ? (
+                        <><span>✓</span> Saved</>
+                      ) : isSavingPdf ? (
+                        <><div className="w-3 h-3 border-2 border-slate-700/30 border-t-slate-700 rounded-full animate-spin"></div> Saving...</>
+                      ) : (
+                        <><span>📄</span> Save Report (PDF)</>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* === FORENSIC INTEGRITY AUDIT === */}
+                  {(activeReport.missing_amendments || activeReport.term_inconsistencies || activeReport.forensic_audit_summary) && (
+                    <div className="space-y-6 mb-10">
+                      <h4 className="text-2xl font-black text-slate-900 border-b border-slate-200 pb-2">Forensic Integrity Audit</h4>
                       
-                      <div className="bg-rose-50/50 border border-rose-100 rounded-xl p-6">
-                        <h5 className="text-rose-800 font-bold text-sm uppercase tracking-wider mb-4 flex items-center gap-2"><span>⚠️</span> Contract Weaknesses</h5>
-                        <ul className="space-y-2">
-                          {activeReport.executive_summary?.weaknesses?.map((item: string, i: number) => (
-                            <li key={i} className="text-sm text-rose-900 leading-relaxed">{item}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    </div>
-
-                    <div className="bg-slate-800 rounded-xl p-6 text-white shadow-md">
-                      <h5 className="font-bold text-sm uppercase tracking-wider mb-6 text-blue-300 flex items-center gap-2"><span>🎯</span> Pre-Negotiation Playbook</h5>
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                        
-                        <div>
-                          <p className="text-xs font-semibold text-slate-400 mb-2 uppercase">Must Haves</p>
-                          <ul className="space-y-2">
-                            {activeReport.executive_summary?.negotiation_playbook?.must_haves?.map((item: string, i: number) => (
-                              <li key={i} className="text-sm text-slate-100">{item}</li>
-                            ))}
-                          </ul>
-                        </div>
-                        
-                        <div>
-                          <p className="text-xs font-semibold text-slate-400 mb-2 uppercase">Things to Remove</p>
-                          <ul className="space-y-2">
-                            {activeReport.executive_summary?.negotiation_playbook?.things_to_remove?.map((item: string, i: number) => (
-                              <li key={i} className="text-sm text-slate-100">{item}</li>
-                            ))}
-                          </ul>
-                        </div>
-                        
-                        <div>
-                          <p className="text-xs font-semibold text-slate-400 mb-2 uppercase">Things to Add</p>
-                          <ul className="space-y-2">
-                            {activeReport.executive_summary?.negotiation_playbook?.things_to_add?.map((item: string, i: number) => (
-                              <li key={i} className="text-sm text-slate-100">{item}</li>
-                            ))}
-                          </ul>
-                        </div>
-                        
-                        <div>
-                          <p className="text-xs font-semibold text-slate-400 mb-2 uppercase">Considerations</p>
-                          <ul className="space-y-2">
-                            {activeReport.executive_summary?.negotiation_playbook?.things_to_consider?.map((item: string, i: number) => (
-                              <li key={i} className="text-sm text-slate-100">{item}</li>
-                            ))}
-                          </ul>
-                        </div>
-                        
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-6">
-                    <h4 className="text-2xl font-black text-slate-900 border-b border-slate-200 pb-2 mt-12">15-Point Deep Dive</h4>
-                    
-                    <div className="grid grid-cols-1 gap-6">
-                      {activeReport.clause_analysis?.map((clause: any, index: number) => (
-                        <div key={index} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                          <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-between items-center">
-                            <h5 className="font-bold text-slate-800">
-                              {clause.id || index + 1}. {getClauseDisplayTitle(clause, index)}
-                            </h5>
-                            {getRiskBadge(clause.risk_level)}
-                          </div>
-                          <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-8">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Expiration Risk */}
+                        {activeReport.is_expired_or_holdover ? (
+                          <div className="bg-rose-50 border border-rose-200 p-5 rounded-xl flex items-start gap-4 shadow-sm">
+                            <span className="text-2xl">🚨</span>
                             <div>
-                              <p className="text-xs font-bold uppercase text-slate-400 tracking-wider mb-2">Extracted Terms</p>
-                              <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line bg-slate-50/50 p-4 rounded-lg border border-slate-100">
-                                {clause.extracted_terms}
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-xs font-bold uppercase text-slate-400 tracking-wider mb-2">AI Risk Analysis</p>
-                              <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line bg-blue-50/30 p-4 rounded-lg border border-blue-100">
-                                {clause.risk_analysis}
-                              </p>
+                              <p className="text-rose-800 font-bold text-sm uppercase tracking-wider mb-1">Critical Expiration Risk</p>
+                              <p className="text-sm text-rose-700">Lease has expired or is in holdover. No extension amendments found.</p>
                             </div>
                           </div>
+                        ) : (
+                          <div className="bg-emerald-50 border border-emerald-200 p-5 rounded-xl flex items-start gap-4 shadow-sm">
+                            <span className="text-2xl">✅</span>
+                            <div>
+                              <p className="text-emerald-800 font-bold text-sm uppercase tracking-wider mb-1">Active Lease Timeline</p>
+                              <p className="text-sm text-emerald-700">Calculated Expiration: {activeReport.expiration_date || "N/A"}</p>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Chronology Intact */}
+                        {!activeReport.is_chronology_intact ? (
+                          <div className="bg-amber-50 border border-amber-200 p-5 rounded-xl flex items-start gap-4 shadow-sm">
+                            <span className="text-2xl">⚠️</span>
+                            <div>
+                              <p className="text-amber-800 font-bold text-sm uppercase tracking-wider mb-1">Chronology Broken</p>
+                              <p className="text-sm text-amber-700">AI detected chronological gaps in the provided documents.</p>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="bg-emerald-50 border border-emerald-200 p-5 rounded-xl flex items-start gap-4 shadow-sm">
+                            <span className="text-2xl">✅</span>
+                            <div>
+                              <p className="text-emerald-800 font-bold text-sm uppercase tracking-wider mb-1">Chronology Intact</p>
+                              <p className="text-sm text-emerald-700">Document timeline appears contiguous. Most recent: {activeReport.most_recent_document_date || "N/A"}</p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Dynamic Discrepancy Alerts */}
+                      {((activeReport.missing_amendments && activeReport.missing_amendments.length > 0) || 
+                        (activeReport.term_inconsistencies && activeReport.term_inconsistencies.length > 0) || 
+                        (activeReport.amendment_reference_errors && activeReport.amendment_reference_errors.length > 0)) && (
+                        <div className="bg-rose-50/50 border border-rose-200 rounded-xl p-6 shadow-sm">
+                          <h5 className="text-rose-800 font-bold text-sm uppercase tracking-wider mb-5 flex items-center gap-2">
+                            <span>🚩</span> Forensic Discrepancies Found
+                          </h5>
+                          <div className="space-y-5">
+                            {activeReport.missing_amendments?.length > 0 && (
+                              <div>
+                                <p className="text-xs font-bold text-rose-800 uppercase mb-2">Missing Amendments</p>
+                                <ul className="space-y-1.5 ml-1">
+                                  {activeReport.missing_amendments.map((msg: string, i: number) => (
+                                    <li key={i} className="text-sm text-rose-900 flex items-start gap-2">
+                                      <span className="text-rose-500">•</span> <span>{msg}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                            {activeReport.term_inconsistencies?.length > 0 && (
+                              <div>
+                                <p className="text-xs font-bold text-rose-800 uppercase mb-2">Term & Timeline Inconsistencies</p>
+                                <ul className="space-y-1.5 ml-1">
+                                  {activeReport.term_inconsistencies.map((msg: string, i: number) => (
+                                    <li key={i} className="text-sm text-rose-900 flex items-start gap-2">
+                                      <span className="text-rose-500">•</span> <span>{msg}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                            {activeReport.amendment_reference_errors?.length > 0 && (
+                              <div>
+                                <p className="text-xs font-bold text-rose-800 uppercase mb-2">Reference Errors / Orphaned Clauses</p>
+                                <ul className="space-y-1.5 ml-1">
+                                  {activeReport.amendment_reference_errors.map((msg: string, i: number) => (
+                                    <li key={i} className="text-sm text-rose-900 flex items-start gap-2">
+                                      <span className="text-rose-500">•</span> <span>{msg}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      ))}
+                      )}
+
+                      {/* Auditor Summary */}
+                      {activeReport.forensic_audit_summary && (
+                        <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 shadow-sm">
+                          <h5 className="text-slate-800 font-bold text-sm uppercase tracking-wider mb-3 flex items-center gap-2">
+                            <span>📋</span> Auditor's Summary
+                          </h5>
+                          <p className="text-sm text-slate-700 leading-relaxed">{activeReport.forensic_audit_summary}</p>
+                        </div>
+                      )}
                     </div>
-                  </div>
+                  )}
+
+                  {/* === ORIGINAL EXECUTIVE SUMMARY === */}
+                  {activeReport.executive_summary && (
+                    <div className="space-y-6">
+                      <h4 className="text-2xl font-black text-slate-900 border-b border-slate-200 pb-2">Executive Summary</h4>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="bg-emerald-50/50 border border-emerald-100 rounded-xl p-6">
+                          <h5 className="text-emerald-800 font-bold text-sm uppercase tracking-wider mb-4 flex items-center gap-2"><span>✓</span> Contract Strengths</h5>
+                          <ul className="space-y-2">
+                            {activeReport.executive_summary.strengths?.map((item: string, i: number) => (
+                              <li key={i} className="text-sm text-emerald-900 leading-relaxed">{item}</li>
+                            ))}
+                          </ul>
+                        </div>
+                        
+                        <div className="bg-rose-50/50 border border-rose-100 rounded-xl p-6">
+                          <h5 className="text-rose-800 font-bold text-sm uppercase tracking-wider mb-4 flex items-center gap-2"><span>⚠️</span> Contract Weaknesses</h5>
+                          <ul className="space-y-2">
+                            {activeReport.executive_summary.weaknesses?.map((item: string, i: number) => (
+                              <li key={i} className="text-sm text-rose-900 leading-relaxed">{item}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-800 rounded-xl p-6 text-white shadow-md">
+                        <h5 className="font-bold text-sm uppercase tracking-wider mb-6 text-blue-300 flex items-center gap-2"><span>🎯</span> Pre-Negotiation Playbook</h5>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                          
+                          <div>
+                            <p className="text-xs font-semibold text-slate-400 mb-2 uppercase">Must Haves</p>
+                            <ul className="space-y-2">
+                              {activeReport.executive_summary.negotiation_playbook?.must_haves?.map((item: string, i: number) => (
+                                <li key={i} className="text-sm text-slate-100">{item}</li>
+                              ))}
+                            </ul>
+                          </div>
+                          
+                          <div>
+                            <p className="text-xs font-semibold text-slate-400 mb-2 uppercase">Things to Remove</p>
+                            <ul className="space-y-2">
+                              {activeReport.executive_summary.negotiation_playbook?.things_to_remove?.map((item: string, i: number) => (
+                                <li key={i} className="text-sm text-slate-100">{item}</li>
+                              ))}
+                            </ul>
+                          </div>
+                          
+                          <div>
+                            <p className="text-xs font-semibold text-slate-400 mb-2 uppercase">Things to Add</p>
+                            <ul className="space-y-2">
+                              {activeReport.executive_summary.negotiation_playbook?.things_to_add?.map((item: string, i: number) => (
+                                <li key={i} className="text-sm text-slate-100">{item}</li>
+                              ))}
+                            </ul>
+                          </div>
+                          
+                          <div>
+                            <p className="text-xs font-semibold text-slate-400 mb-2 uppercase">Considerations</p>
+                            <ul className="space-y-2">
+                              {activeReport.executive_summary.negotiation_playbook?.things_to_consider?.map((item: string, i: number) => (
+                                <li key={i} className="text-sm text-slate-100">{item}</li>
+                              ))}
+                            </ul>
+                          </div>
+                          
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* === ORIGINAL 15-POINT CLAUSE DEEP DIVE === */}
+                  {activeReport.clause_analysis && activeReport.clause_analysis.length > 0 && (
+                    <div className="space-y-6">
+                      <h4 className="text-2xl font-black text-slate-900 border-b border-slate-200 pb-2 mt-12">15-Point Deep Dive</h4>
+                      
+                      <div className="grid grid-cols-1 gap-6">
+                        {activeReport.clause_analysis.map((clause: any, index: number) => (
+                          <div key={index} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                            <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-between items-center">
+                              <h5 className="font-bold text-slate-800">
+                                {clause.id || index + 1}. {getClauseDisplayTitle(clause, index)}
+                              </h5>
+                              {getRiskBadge(clause.risk_level)}
+                            </div>
+                            <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-8">
+                              <div>
+                                <p className="text-xs font-bold uppercase text-slate-400 tracking-wider mb-2">Extracted Terms</p>
+                                <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line bg-slate-50/50 p-4 rounded-lg border border-slate-100">
+                                  {clause.extracted_terms}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-xs font-bold uppercase text-slate-400 tracking-wider mb-2">AI Risk Analysis</p>
+                                <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line bg-blue-50/30 p-4 rounded-lg border border-blue-100">
+                                  {clause.risk_analysis}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                 </div>
               )}

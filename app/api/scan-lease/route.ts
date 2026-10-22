@@ -1,203 +1,103 @@
-import { NextResponse } from "next/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import { GoogleAIFileManager } from "@google/generative-ai/server";
+import { NextRequest, NextResponse } from "next/server";
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import { createClient } from "@supabase/supabase-js";
-import os from "os";
-import fs from "fs";
-import path from "path";
 
+// Initialize external clients
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-const fileManager = new GoogleAIFileManager(process.env.GEMINI_API_KEY!);
-const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
 
-function getSupportedMimeType(file: File): string {
-  const ext = (file.name.split(".").pop() || "").toLowerCase();
-  if (ext === "pdf") return "application/pdf";
-  if (ext === "png") return "image/png";
-  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
-  if (ext === "webp") return "image/webp";
-  if (ext === "txt" || ext === "csv") return "text/plain";
-  return "application/pdf";
-}
-
-// Guarantees that whether Gemini returns [{...}], { data: {...} }, { site: {...} }, or UpperCase keys,
-// we always extract and merge into a single flat object with the exact 23 expected keys.
-function normalizeExtractedObject(parsed: any): Record<string, any> {
-  if (!parsed) return {};
-
-  // If Gemini returned an array of objects (e.g. one per document), merge them so later docs (addendums) override earlier ones
-  if (Array.isArray(parsed)) {
-    const merged: Record<string, any> = {};
-    for (const item of parsed) {
-      if (item && typeof item === "object") {
-        for (const [k, v] of Object.entries(item)) {
-          if (v !== null && v !== undefined && v !== "" && v !== "null" && v !== "N/A") {
-            merged[k.toLowerCase().trim()] = v;
-          }
-        }
-      }
-    }
-    return merged;
-  }
-
-  // If Gemini nested the response inside a wrapper key like { site_data: {...} } or { properties: {...} }
-  if (typeof parsed === "object") {
-    const keys = Object.keys(parsed);
-    if (
-      keys.length === 1 &&
-      parsed[keys[0]] &&
-      typeof parsed[keys[0]] === "object"
-    ) {
-      return normalizeExtractedObject(parsed[keys[0]]);
-    }
-
-    const normalized: Record<string, any> = {};
-    for (const [k, v] of Object.entries(parsed)) {
-      if (v !== "null" && v !== "N/A") {
-        normalized[k.toLowerCase().trim()] = v;
-      }
-    }
-    return normalized;
-  }
-
-  return {};
-}
-
-export async function POST(req: Request) {
-  const tempFiles: string[] = [];
-
+export async function POST(req: NextRequest) {
   try {
-    // 1. Extract and validate the authorization token
-    const authHeader = req.headers.get("authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "Unauthorized access" }, { status: 401 });
-    }
+    // 1. JWT Security Validation
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) return NextResponse.json({ error: "Missing Authorization header" }, { status: 401 });
     
-    const token = authHeader.split(" ")[1];
+    const token = authHeader.replace("Bearer ", "");
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     
-    if (authError || !user) {
-      return NextResponse.json({ error: "Invalid or expired session" }, { status: 401 });
+    if (authError || !user) return NextResponse.json({ error: "Unauthorized request" }, { status: 403 });
+
+    // 2. Extract Document Array from Request
+    const { leaseDocs } = await req.json();
+    if (!leaseDocs || !Array.isArray(leaseDocs) || leaseDocs.length === 0) {
+      return NextResponse.json({ error: "No lease documents provided for analysis" }, { status: 400 });
     }
 
-    const formData = await req.formData();
-    const multiFiles = formData.getAll("files") as File[];
-    const singleFile = formData.get("file") as File | null;
+    // 3. Download and format all PDFs for Gemini inline processing
+    const pdfParts = await Promise.all(leaseDocs.map(async (doc: any) => {
+      const response = await fetch(doc.file_url);
+      const arrayBuffer = await response.arrayBuffer();
+      const base64Data = Buffer.from(arrayBuffer).toString("base64");
+      
+      return {
+        inlineData: {
+          data: base64Data,
+          mimeType: "application/pdf"
+        }
+      };
+    }));
 
-    const filesToProcess: File[] =
-      multiFiles.length > 0 ? multiFiles : singleFile ? [singleFile] : [];
-
-    if (filesToProcess.length === 0) {
-      return NextResponse.json({ error: "No documents uploaded" }, { status: 400 });
-    }
-
-    // Lock to the stable production model
+    // 4. Unified AI Configuration & Forensic Schema
     const model = genAI.getGenerativeModel({
       model: "gemini-3.1-pro-preview",
+      systemInstruction: `You are an expert commercial real estate forensic auditor. 
+      First, extract the standard commercial lease metadata (parties, rent, dates) from the provided documents.
+      Second, audit the entire stack of provided documents against each other executing these strict forensic rules:
+      1. Chronology: Identify the most recent document and base all active terms on it.
+      2. Missing Amendments: If any text references an Amendment, Addendum, or Exhibit not present in the provided files, flag it explicitly in missing_amendments.
+      3. Paragraph Cross-Referencing: Verify that any uploaded amendments correctly reference existing paragraphs or clauses in the primary lease agreement. Flag orphaned clauses in amendment_reference_errors.
+      4. Term Consistency: Calculate the lease term based on commencement and expiration dates. Flag missing lease terms, mathematical inconsistencies, or conflicting dates between documents in term_inconsistencies.
+      5. Expiration Risk: Compare the final established expiration date against the current date. Mark is_expired_or_holdover as true if the lease has lapsed without a provided extension.`,
       generationConfig: {
         responseMimeType: "application/json",
-        temperature: 0.1,
-      },
-    });
-
-    const parts: any[] = [];
-    const fileNames: string[] = [];
-
-    // Bypass Next.js memory limits by routing through the Google File API
-    for (const file of filesToProcess) {
-      const bytes = await file.arrayBuffer();
-      const buffer = Buffer.from(bytes);
-      const mimeType = getSupportedMimeType(file);
-      
-      const safeName = file.name.replace(/[^a-zA-Z0-9.]/g, "_");
-      const tempPath = path.join(os.tmpdir(), `scan_${Date.now()}_${safeName}`);
-      
-      fs.writeFileSync(tempPath, buffer);
-      tempFiles.push(tempPath);
-
-      const uploadResult = await fileManager.uploadFile(tempPath, {
-        mimeType: mimeType,
-        displayName: file.name,
-      });
-
-      parts.push({
-        fileData: {
-          mimeType: uploadResult.file.mimeType,
-          fileUri: uploadResult.file.uri,
-        },
-      });
-      fileNames.push(file.name);
-    }
-
-    const prompt = `You are a senior commercial real estate lease auditor and data extraction specialist.
-Analyze the ${filesToProcess.length} attached lease/property document(s) (${fileNames.join(", ")}) and synthesize all information into a SINGLE flat JSON object (DO NOT return a JSON array).
-
-If multiple documents are provided (such as a Master Lease and an Amendment/Addendum), merge the data and use the most current/amended figures for rent, lease dates, and floor area.
-
-EXTRACT THESE EXACT 23 KEYS INTO A SINGLE FLAT JSON OBJECT:
-{
-  "site_code": "Logical code based on Country-City-Activity (e.g. US-DET-O or ZA-CPT-W) or contract ref",
-  "common_name": "Building name, industrial park name, or '<City> <Activity>'",
-  "activity_type": "Must be one of: Office, Plant, Plant On/In-site, Warehouse, Warehouse - 3rd Party, Land, Other",
-  "divisional_belonging": "Business division if stated, otherwise empty string",
-  "legal_entity": "Full legal name of the Tenant company signing the lease",
-  "status": "Operational",
-  "jv_status": "No",
-  "country": "Full country name where the property is located",
-  "state": "State, province, or region name (or empty string)",
-  "city": "City name where the property is located",
-  "street_address": "Street address of the leased premises",
-  "zip_code": "Postal or ZIP code of the leased premises",
-  "latitude": 0.0,
-  "longitude": 0.0,
-  "sqm_land": 0,
-  "sqm_building": 0,
-  "contract_type": "Rented/Leased",
-  "leaseholder": "Full legal name of the Tenant / Lessee",
-  "lease_owner": "Full legal name of the Landlord / Lessor / Owner",
-  "lease_start": "YYYY-MM-DD",
-  "lease_end": "YYYY-MM-DD",
-  "annual_cost": 0,
-  "local_currency": "3-letter ISO currency code (e.g. USD, EUR, SEK, ZAR, GBP, PLN)"
-}
-
-IMPORTANT CALCULATION RULES:
-1. "sqm_building": Total leased building area in SQUARE METERS (number only). If the contract states Square Feet (sq ft / SF / RSF), divide by 10.7639 and round to a whole number.
-2. "annual_cost": Total ANNUAL base rent (number only, no commas or currency symbols).
-   - If the contract states Monthly rent, multiply by 12.
-   - If the contract states rate per sqm per month, multiply by sqm_building * 12.
-   - If the contract states rate per sq ft per year, multiply by total sq ft.
-3. "latitude" & "longitude": Estimate accurate decimal coordinates for the extracted street_address, city, and country.
-4. "lease_start" & "lease_end": Must be formatted as YYYY-MM-DD.`;
-
-    parts.push({ text: prompt });
-
-    const result = await model.generateContent(parts);
-    const rawText = result.response.text() || "{}";
-    const cleanedJson = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
-    const parsedJson = JSON.parse(cleanedJson);
-    const extractedData = normalizeExtractedObject(parsedJson);
-
-    return NextResponse.json({
-      success: true,
-      data: extractedData,
-    });
-  } catch (error: any) {
-    console.error("AI Scan Error:", error);
-    return NextResponse.json(
-      { error: error.message || "Failed to process documents" },
-      { status: 500 }
-    );
-  } finally {
-    // Clean up local temp files immediately to free up container space
-    tempFiles.forEach(tempPath => {
-      try {
-        if (fs.existsSync(tempPath)) {
-          fs.unlinkSync(tempPath);
+        responseSchema: {
+          type: SchemaType.OBJECT,
+          properties: {
+            landlord_name: { type: SchemaType.STRING },
+            tenant_name: { type: SchemaType.STRING },
+            commencement_date: { type: SchemaType.STRING },
+            expiration_date: { type: SchemaType.STRING },
+            annual_rent: { type: SchemaType.NUMBER },
+            currency: { type: SchemaType.STRING },
+            most_recent_document_date: { type: SchemaType.STRING },
+            is_chronology_intact: { type: SchemaType.BOOLEAN },
+            missing_amendments: { 
+              type: SchemaType.ARRAY, 
+              items: { type: SchemaType.STRING },
+              description: "List of any amendments, addendums, or exhibits referenced in the text but missing from the provided files."
+            },
+            term_inconsistencies: { 
+              type: SchemaType.ARRAY, 
+              items: { type: SchemaType.STRING },
+              description: "Any conflicting dates, missing defined lease terms, or timeline math errors."
+            },
+            amendment_reference_errors: { 
+              type: SchemaType.ARRAY, 
+              items: { type: SchemaType.STRING },
+              description: "List of amendments that reference paragraphs or clauses not found in the main agreement."
+            },
+            is_expired_or_holdover: { type: SchemaType.BOOLEAN },
+            forensic_audit_summary: { type: SchemaType.STRING }
+          },
+          required: [
+            "landlord_name", "tenant_name", "commencement_date", "expiration_date", 
+            "annual_rent", "currency", "most_recent_document_date", "is_chronology_intact", 
+            "missing_amendments", "term_inconsistencies", "amendment_reference_errors", 
+            "is_expired_or_holdover", "forensic_audit_summary"
+          ]
         }
-      } catch (e) {
-        console.error("Failed to clean up temp file:", tempPath, e);
       }
     });
+
+    // 5. Execute Batch AI Analysis
+    const promptMessage = `Analyze this set of lease documents for ${leaseDocs.length} chronological forensic consistency.`;
+    const result = await model.generateContent([promptMessage, ...pdfParts]);
+    
+    const responseText = result.response.text();
+    return NextResponse.json(JSON.parse(responseText));
+
+  } catch (error: any) {
+    console.error("Lease Analytics Error:", error);
+    return NextResponse.json({ error: error.message || "Failed to process lease documents" }, { status: 500 });
   }
 }
