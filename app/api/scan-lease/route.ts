@@ -3,15 +3,23 @@ import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createClient } from "@supabase/supabase-js";
 
-const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-
 interface LeaseDocItem {
   file_url: string;
 }
 
 export async function POST(req: NextRequest) {
   try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const geminiApiKey = process.env.GEMINI_API_KEY;
+
+    if (!supabaseUrl || !supabaseServiceKey || !geminiApiKey) {
+      return NextResponse.json({ error: "Server environment variables are missing." }, { status: 500 });
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const genAI = new GoogleGenerativeAI(geminiApiKey);
+
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
       return NextResponse.json({ error: "Missing Authorization header" }, { status: 401 });
