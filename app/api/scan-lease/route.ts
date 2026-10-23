@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
       };
     }));
 
-    // 4. Unified AI Configuration: Forensic Audit + 15-Point Deep Dive Schema using SchemaType enums
+    // 4. Unified AI Configuration with `as any` type bypass for schema compilation
     const model = genAI.getGenerativeModel({
       model: "gemini-3.1-pro-preview",
       systemInstruction: `You are an elite commercial real estate forensic auditor and legal analyst. 
@@ -62,7 +62,6 @@ export async function POST(req: NextRequest) {
         responseSchema: {
           type: SchemaType.OBJECT,
           properties: {
-            // Standard Metadata
             landlord_name: { type: SchemaType.STRING },
             tenant_name: { type: SchemaType.STRING },
             commencement_date: { type: SchemaType.STRING },
@@ -70,7 +69,6 @@ export async function POST(req: NextRequest) {
             annual_rent: { type: SchemaType.NUMBER },
             currency: { type: SchemaType.STRING },
             
-            // Forensic Audit
             most_recent_document_date: { type: SchemaType.STRING },
             is_chronology_intact: { type: SchemaType.BOOLEAN },
             is_expired_or_holdover: { type: SchemaType.BOOLEAN },
@@ -79,7 +77,6 @@ export async function POST(req: NextRequest) {
             amendment_reference_errors: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
             forensic_audit_summary: { type: SchemaType.STRING },
 
-            // Executive Summary
             executive_summary: {
               type: SchemaType.OBJECT,
               properties: {
@@ -99,7 +96,6 @@ export async function POST(req: NextRequest) {
               required: ["strengths", "weaknesses", "negotiation_playbook"]
             },
 
-            // 15-Point Clause Analysis
             clause_analysis: {
               type: SchemaType.ARRAY,
               items: {
@@ -120,7 +116,7 @@ export async function POST(req: NextRequest) {
             "most_recent_document_date", "is_chronology_intact", "is_expired_or_holdover",
             "executive_summary", "clause_analysis"
           ]
-        }
+        } as any
       }
     });
 
