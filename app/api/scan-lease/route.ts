@@ -1,30 +1,37 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createClient } from "@supabase/supabase-js";
 
-// Initialize external clients
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
+interface LeaseDocItem {
+  file_url: string;
+}
+
 export async function POST(req: NextRequest) {
   try {
-    // 1. JWT Security Validation
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader) return NextResponse.json({ error: "Missing Authorization header" }, { status: 401 });
+    if (!authHeader) {
+      return NextResponse.json({ error: "Missing Authorization header" }, { status: 401 });
+    }
     
     const token = authHeader.replace("Bearer ", "");
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     
-    if (authError || !user) return NextResponse.json({ error: "Unauthorized request" }, { status: 403 });
+    if (authError || !user) {
+      return NextResponse.json({ error: "Unauthorized request" }, { status: 403 });
+    }
 
-    // 2. Extract Document Array from Request
-    const { leaseDocs } = await req.json();
+    const body = await req.json() as { leaseDocs?: LeaseDocItem[] };
+    const leaseDocs = body.leaseDocs;
+
     if (!leaseDocs || !Array.isArray(leaseDocs) || leaseDocs.length === 0) {
       return NextResponse.json({ error: "No lease documents provided for analysis" }, { status: 400 });
     }
 
-    // 3. Download and format all PDFs for Gemini inline processing
-    const pdfParts = await Promise.all(leaseDocs.map(async (doc: any) => {
+    const pdfParts = await Promise.all(leaseDocs.map(async (doc: LeaseDocItem) => {
       const response = await fetch(doc.file_url);
       const arrayBuffer = await response.arrayBuffer();
       const base64Data = Buffer.from(arrayBuffer).toString("base64");
@@ -37,7 +44,6 @@ export async function POST(req: NextRequest) {
       };
     }));
 
-    // 4. Robust AI Configuration using System Instructions for JSON structure
     const model = genAI.getGenerativeModel({
       model: "gemini-3.1-pro-preview",
       systemInstruction: `You are an elite commercial real estate forensic auditor and legal analyst. 
@@ -64,18 +70,17 @@ export async function POST(req: NextRequest) {
       }
     });
 
-    // 5. Execute Batch AI Analysis
     const promptMessage = `Perform the comprehensive forensic audit and 15-point deep dive on this set of ${leaseDocs.length} commercial real estate lease document(s).`;
     const result = await model.generateContent([promptMessage, ...pdfParts]);
     
     let responseText = result.response.text();
-    // Clean any accidental markdown code wrappers
     responseText = responseText.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/, "").trim();
 
     return NextResponse.json({ data: JSON.parse(responseText) });
 
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errMessage = error instanceof Error ? error.message : "Failed to process lease documents";
     console.error("Lease Analytics Error:", error);
-    return NextResponse.json({ error: error.message || "Failed to process lease documents" }, { status: 500 });
+    return NextResponse.json({ error: errMessage }, { status: 500 });
   }
 }

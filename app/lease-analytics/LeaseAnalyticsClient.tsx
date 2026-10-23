@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useState, useEffect, useRef } from "react";
@@ -185,13 +186,14 @@ export default function LeaseAnalyticsClient() {
         }
       }
 
-      setLoadingStatus(`Forensic AI Engine analyzing ${finalDocUrls.length} document(s)...`);
-      
-      // Map URLs to the JSON array format the unified backend expects
-      const payloadDocs = finalDocUrls.map(url => ({ file_url: url }));
+      setLoadingStatus("AI Engine extracting Lease Term, Notice Period(s), Renewal Options & 14 additional clauses...");
+      const aiFormData = new FormData();
+      finalDocUrls.forEach(url => aiFormData.append("fileUrls[]", url));
 
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
+
+      const payloadDocs = finalDocUrls.map(url => ({ file_url: url }));
 
       const res = await fetch("/api/scan-lease", { 
         method: "POST", 
@@ -207,9 +209,8 @@ export default function LeaseAnalyticsClient() {
 
       setLoadingStatus("Saving analytics to master database...");
       
-      // Safely handle both root object and wrapped { data: {...} } backend responses
       const reportPayload = aiData.data || aiData;
-      
+
       const savePayload = {
         site_id: siteNum,
         document_id: primaryDocId ? Number(primaryDocId) : null, 
@@ -225,7 +226,6 @@ export default function LeaseAnalyticsClient() {
       setActiveReport(reportPayload);
       setNewFiles([]);
       
-      // Refresh document list post-upload
       const { data: updatedDocs } = await supabase
         .from("site_documents")
         .select("*")
@@ -336,7 +336,6 @@ export default function LeaseAnalyticsClient() {
         y += boxHeight + 5;
       };
 
-      // === Forensic Integrity Audit PDF Section ===
       if (activeReport.missing_amendments || activeReport.term_inconsistencies || activeReport.forensic_audit_summary) {
         doc.setFont("helvetica", "bold");
         doc.setFontSize(13);
@@ -368,20 +367,10 @@ export default function LeaseAnalyticsClient() {
         ensureSpace(15);
       }
 
-      // === Executive Summary PDF Section ===
       if (activeReport.executive_summary) {
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(13);
-        doc.setTextColor(15, 23, 42);
-        doc.text("Executive Summary", margin, y);
-        y += 2;
-        doc.setDrawColor(226, 232, 240);
-        doc.line(margin, y, pageWidth - margin, y);
-        y += 6;
-
         renderSummaryBlock(
           "Contract Strengths",
-          activeReport.executive_summary.strengths || [],
+          activeReport.executive_summary?.strengths || [],
           [240, 253, 244],
           [187, 247, 208],
           [6, 95, 70]
@@ -389,13 +378,13 @@ export default function LeaseAnalyticsClient() {
 
         renderSummaryBlock(
           "Contract Weaknesses",
-          activeReport.executive_summary.weaknesses || [],
+          activeReport.executive_summary?.weaknesses || [],
           [255, 241, 242],
           [254, 205, 211],
           [159, 18, 57]
         );
 
-        const playbook = activeReport.executive_summary.negotiation_playbook;
+        const playbook = activeReport.executive_summary?.negotiation_playbook;
         if (playbook) {
           const categories = [
             { label: "MUST HAVES", list: playbook.must_haves || [] },
@@ -482,7 +471,6 @@ export default function LeaseAnalyticsClient() {
         }
       }
 
-      // === 15-Point Deep Dive PDF Section ===
       if (activeReport.clause_analysis && activeReport.clause_analysis.length > 0) {
         ensureSpace(25);
         y += 4;
@@ -968,7 +956,7 @@ export default function LeaseAnalyticsClient() {
                     </div>
                   )}
 
-                  {/* === ORIGINAL 15-POINT CLAUSE DEEP DIVE === */}
+                  {/* === 15-POINT CLAUSE DEEP DIVE === */}
                   {activeReport.clause_analysis && activeReport.clause_analysis.length > 0 && (
                     <div className="space-y-6">
                       <h4 className="text-2xl font-black text-slate-900 border-b border-slate-200 pb-2 mt-12">15-Point Deep Dive</h4>
