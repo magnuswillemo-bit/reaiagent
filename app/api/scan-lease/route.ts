@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createClient } from "@supabase/supabase-js";
 
 // Initialize external clients
@@ -37,86 +37,30 @@ export async function POST(req: NextRequest) {
       };
     }));
 
-    // 4. Unified AI Configuration with `as any` type bypass for schema compilation
+    // 4. Robust AI Configuration using System Instructions for JSON structure
     const model = genAI.getGenerativeModel({
       model: "gemini-3.1-pro-preview",
       systemInstruction: `You are an elite commercial real estate forensic auditor and legal analyst. 
-      Your task is to analyze the provided stack of lease documents (primary agreement plus any amendments) and return a comprehensive structured JSON response.
+      Analyze the provided lease documents and return your response strictly as a valid JSON object with NO markdown formatting, backticks, or extra text.
 
-      PHASE 1: FORENSIC INTEGRITY AUDIT
-      - Cross-reference all provided files. Identify the chronological order.
-      - Calculate the active lease term and track if the lease is currently expired/in holdover (is_expired_or_holdover).
-      - Flag missing amendments: If a document references an amendment or exhibit not present in the files, list it in missing_amendments.
-      - Flag term inconsistencies: Any conflicting dates or mathematical errors in the timeline.
-      - Flag amendment reference errors: Amendments that cite paragraphs missing from the main lease.
-      
-      PHASE 2: EXECUTIVE SUMMARY & PLAYBOOK
-      - Extract key contract strengths and weaknesses.
-      - Formulate a pre-negotiation playbook (must-haves, removals, additions, considerations).
-      
-      PHASE 3: 15-POINT CLAUSE DEEP DIVE
-      - Extract specific terms and provide risk analysis for standard commercial clauses (Term, Rent, Maintenance, Insurance, Defaults, Assignment, etc.).
-      - Assign a risk_level (High, Medium, Low, or Info) to each clause based on tenant exposure.`,
+      The JSON object must have exactly these keys and types:
+      - landlord_name (string)
+      - tenant_name (string)
+      - commencement_date (string)
+      - expiration_date (string)
+      - annual_rent (number)
+      - currency (string)
+      - most_recent_document_date (string)
+      - is_chronology_intact (boolean)
+      - is_expired_or_holdover (boolean)
+      - missing_amendments (array of strings)
+      - term_inconsistencies (array of strings)
+      - amendment_reference_errors (array of strings)
+      - forensic_audit_summary (string)
+      - executive_summary (object with: strengths [array of strings], weaknesses [array of strings], negotiation_playbook [object with: must_haves, things_to_remove, things_to_add, things_to_consider - all arrays of strings])
+      - clause_analysis (array of objects, each with: id [number], title [string], extracted_terms [string], risk_analysis [string], risk_level [string: 'High', 'Medium', 'Low', or 'Info'])`,
       generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: SchemaType.OBJECT,
-          properties: {
-            landlord_name: { type: SchemaType.STRING },
-            tenant_name: { type: SchemaType.STRING },
-            commencement_date: { type: SchemaType.STRING },
-            expiration_date: { type: SchemaType.STRING },
-            annual_rent: { type: SchemaType.NUMBER },
-            currency: { type: SchemaType.STRING },
-            
-            most_recent_document_date: { type: SchemaType.STRING },
-            is_chronology_intact: { type: SchemaType.BOOLEAN },
-            is_expired_or_holdover: { type: SchemaType.BOOLEAN },
-            missing_amendments: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
-            term_inconsistencies: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
-            amendment_reference_errors: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
-            forensic_audit_summary: { type: SchemaType.STRING },
-
-            executive_summary: {
-              type: SchemaType.OBJECT,
-              properties: {
-                strengths: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
-                weaknesses: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
-                negotiation_playbook: {
-                  type: SchemaType.OBJECT,
-                  properties: {
-                    must_haves: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
-                    things_to_remove: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
-                    things_to_add: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
-                    things_to_consider: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } }
-                  },
-                  required: ["must_haves", "things_to_remove", "things_to_add", "things_to_consider"]
-                }
-              },
-              required: ["strengths", "weaknesses", "negotiation_playbook"]
-            },
-
-            clause_analysis: {
-              type: SchemaType.ARRAY,
-              items: {
-                type: SchemaType.OBJECT,
-                properties: {
-                  id: { type: SchemaType.NUMBER },
-                  title: { type: SchemaType.STRING },
-                  extracted_terms: { type: SchemaType.STRING },
-                  risk_analysis: { type: SchemaType.STRING },
-                  risk_level: { type: SchemaType.STRING, description: "Must be 'High', 'Medium', 'Low', or 'Info'" }
-                },
-                required: ["id", "title", "extracted_terms", "risk_analysis", "risk_level"]
-              }
-            }
-          },
-          required: [
-            "landlord_name", "tenant_name", "commencement_date", "expiration_date", 
-            "most_recent_document_date", "is_chronology_intact", "is_expired_or_holdover",
-            "executive_summary", "clause_analysis"
-          ]
-        } as any
+        responseMimeType: "application/json"
       }
     });
 
@@ -124,7 +68,10 @@ export async function POST(req: NextRequest) {
     const promptMessage = `Perform the comprehensive forensic audit and 15-point deep dive on this set of ${leaseDocs.length} commercial real estate lease document(s).`;
     const result = await model.generateContent([promptMessage, ...pdfParts]);
     
-    const responseText = result.response.text();
+    let responseText = result.response.text();
+    // Clean any accidental markdown code wrappers
+    responseText = responseText.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/, "").trim();
+
     return NextResponse.json({ data: JSON.parse(responseText) });
 
   } catch (error: any) {
